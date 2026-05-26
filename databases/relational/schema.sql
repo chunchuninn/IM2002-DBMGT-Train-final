@@ -180,7 +180,24 @@ CREATE TABLE metro_schedules (
 
 
 -- ------------------------------------------------------------
--- 2.2 national_rail_schedules
+-- 2.2 national_rail_seat_layouts
+-- coaches 為深層巢狀陣列（車廂 → 座位清單），使用 JSONB。
+-- schedule_id UNIQUE：強制一個班次只能對應一套座位佈局。
+-- ON DELETE CASCADE：班次撤銷時，對應佈局同步刪除。
+-- ------------------------------------------------------------
+CREATE TABLE national_rail_seat_layouts (
+    layout_id    VARCHAR(20)  PRIMARY KEY,
+
+    -- 移除 schedule_id，避免產生產生循環依賴
+    layout_name  VARCHAR(100) NOT NULL DEFAULT 'Standard Template',
+    coaches      JSONB        NOT NULL,
+
+    CONSTRAINT chk_coaches_is_array 
+        CHECK (jsonb_typeof(coaches) = 'array')
+);
+
+-- ------------------------------------------------------------
+-- 2.3 national_rail_schedules
 -- ------------------------------------------------------------
 CREATE TABLE national_rail_schedules (
     schedule_id                  VARCHAR(20)     PRIMARY KEY,
@@ -221,23 +238,6 @@ CREATE TABLE national_rail_schedules (
         FOREIGN KEY (layout_id)
         REFERENCES national_rail_seat_layouts (layout_id)
         ON DELETE RESTRICT ON UPDATE CASCADE
-);
-
--- ------------------------------------------------------------
--- 2.3 national_rail_seat_layouts
--- coaches 為深層巢狀陣列（車廂 → 座位清單），使用 JSONB。
--- schedule_id UNIQUE：強制一個班次只能對應一套座位佈局。
--- ON DELETE CASCADE：班次撤銷時，對應佈局同步刪除。
--- ------------------------------------------------------------
-CREATE TABLE national_rail_seat_layouts (
-    layout_id    VARCHAR(20)  PRIMARY KEY,
-
-    -- 移除 schedule_id，避免產生產生循環依賴
-    layout_name  VARCHAR(100) NOT NULL DEFAULT 'Standard Template',
-    coaches      JSONB        NOT NULL,
-
-    CONSTRAINT chk_coaches_is_array 
-        CHECK (jsonb_typeof(coaches) = 'array')
 );
 
 
@@ -463,4 +463,4 @@ CREATE TABLE IF NOT EXISTS policy_documents (
 );
 
 -- Index for fast cosine similarity search
-CREATE INDEX IF NOT EXISTS ON policy_documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding ON policy_documents USING hnsw (embedding vector_cosine_ops);

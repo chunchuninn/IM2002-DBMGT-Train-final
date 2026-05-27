@@ -370,48 +370,84 @@ def seed_national_rail_schedules(cur):
 
 # ── Batch A: Users & Credentials (安全解耦) ──────────────────────────────────
 def seed_users(cur):
+    """
+    匯入使用者與憑證資料。
+    包含 OOM 防護 (Generator)、UPSERT 覆寫、嚴謹的憑證完整性檢查與 Fail-Fast 驗證。
+    """
     data = load("registered_users.json")
-    user_rows = []
-    cred_rows = []
+    
+    # ==========================================
+    # 階段 1：處理 users 表 (一般個資)
+    # ==========================================
+    u_cols = ['user_id', 'full_name', 'email', 'phone', 'date_of_birth', 'registered_at', 'is_active']
 
-    for row in data:
-        user_id     = row.get('user_id')
-        raw_password = row.get('password')
-        raw_answer   = row.get('secret_answer')
-
-        hashed_password = ph.hash(raw_password) if raw_password else None
-        hashed_answer   = ph.hash(raw_answer)   if raw_answer   else None
-
-        # Bug 3 修正：users 表不含 secret_question / secret_answer
-        user_rows.append((
-            user_id,
-            row.get('full_name'),
-            row.get('email'),
-            clean_val(row.get('phone')),
-            clean_val(row.get('date_of_birth')),
-            row.get('registered_at'),
-            row.get('is_active', True),
-        ))
-
-        # ✅ Bug 3 修正：user_credential 需要 stored_hash + secret_question + secret_answer_hash
-        if hashed_password:
-            cred_rows.append((
+    def generate_users(user_data):
+        for row in user_data:
+            user_id = row.get('user_id')
+            email = row.get('email')
+            full_name = row.get('full_name')
+            
+            # 提早失敗防護：絕對不允許缺少主鍵或核心個資
+            if not user_id or not email or not full_name:
+                raise ValueError(f"資料異常：缺少 user_id, full_name 或 email。原始資料：{row}")
+                
+            yield (
                 user_id,
-                hashed_password,
-                row.get('secret_question'),
-                hashed_answer,
-            ))
+                full_name,
+                email,
+                clean_val(row.get('phone')),
+                clean_val(row.get('date_of_birth')),
+                clean_val(row.get('registered_at')),
+                row.get('is_active', True)
+            )
 
-    u_cols = ['user_id', 'full_name', 'email', 'phone', 'date_of_birth',
-              'registered_at', 'is_active']
+    # 組裝 users 的 UPSERT 語句
+    u_update_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in u_cols if col != 'user_id'])
+    u_sql = f"""
+        INSERT INTO users ({', '.join(u_cols)})
+        VALUES %s
+        ON CONFLICT (user_id) DO UPDATE SET {u_update_clause}
+    """
+    execute_values(cur, u_sql, generate_users(data), page_size=1000)
+    print(f"  [OK]   users — {cur.rowcount} row(s) processed (UPSERT).")
+
+
+    # ==========================================
+    # 階段 2：處理 user_credential 表 (高敏感資料)
+    # ==========================================
     c_cols = ['user_id', 'stored_hash', 'secret_question', 'secret_answer_hash']
 
-    u_count = insert_many(cur, "users", u_cols, user_rows, "user_id")
-    print(f"  [OK]   users — {u_count} row(s) processed.")
+    def generate_credentials(user_data):
+        for row in user_data:
+            user_id = row.get('user_id')
+            raw_password = row.get('password')
+            secret_question = row.get('secret_question')
+            raw_answer = row.get('secret_answer')
 
-    # ✅ Bug 3 修正：正確表名 user_credential（非 table_credential）
-    c_count = insert_many(cur, "user_credential", c_cols, cred_rows, "user_id")
-    print(f"  [OK]   user_credential — {c_count} row(s) processed.")
+            # 嚴格的憑證完整性檢查：這三個欄位在 schema 中皆為 NOT NULL
+            if not user_id or not raw_password or not secret_question or not raw_answer:
+                # 缺乏任一憑證資料，則視為「無密碼使用者」(如 SSO)，安全跳過
+                continue
+
+            # 只有在此筆資料準備寫入時，才即時耗用 CPU 進行雜湊運算
+            yield (
+                user_id,
+                ph.hash(raw_password),
+                secret_question,
+                ph.hash(raw_answer)
+            )
+
+    # 組裝 user_credential 的 UPSERT 語句
+    c_update_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in c_cols if col != 'user_id'])
+    # 加上 updated_at = NOW() 確保密碼更新時能留下紀錄
+    c_sql = f"""
+        INSERT INTO user_credential ({', '.join(c_cols)})
+        VALUES %s
+        ON CONFLICT (user_id) DO UPDATE 
+        SET {c_update_clause}, updated_at = NOW()
+    """
+    execute_values(cur, c_sql, generate_credentials(data), page_size=500)
+    print(f"  [OK]   user_credential — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 # ── Batch C: Transactions & Polymorphic ──────────────────────────────────────

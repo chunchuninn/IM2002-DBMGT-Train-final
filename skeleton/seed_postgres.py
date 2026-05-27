@@ -57,16 +57,26 @@ def connect():
     )
 
 
-def insert_many(cur, table, columns, rows, pk_column):
-    """ Bulk insert with ON CONFLICT (pk_column) DO NOTHING. Returns row count inserted."""
-    if not rows:
+def insert_many(cur, table, columns, rows, pk_column, page_size=1000):
+    if isinstance(rows, list) and len(rows) == 0:
         return 0
+
+    update_cols = [col for col in columns if col != pk_column]
+    
+    if update_cols:
+        update_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols])
+        conflict_action = f"DO UPDATE SET {update_clause}"
+    else:
+        conflict_action = "DO NOTHING"
+
     sql = (
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES %s "
-        f"ON CONFLICT ({pk_column}) DO NOTHING"
+        f"ON CONFLICT ({pk_column}) {conflict_action}"
     )
-    execute_values(cur, sql, rows)
-    return len(rows)
+    
+    execute_values(cur, sql, rows, page_size=page_size)
+    
+    return cur.rowcount
 
 # 避免空值資料
 def clean_val(val):
@@ -80,46 +90,93 @@ def clean_val(val):
 # ── Batch A: Stations ────────────────────────────────────────────────────────
 def seed_metro_stations(cur):
     data = load("metro_stations.json")
-    rows = []
-    for row in data:
-        rows.append((
-            row.get('station_id'),
-            row.get('name'),
-            row.get('lines', []),
-            row.get('is_interchange_metro', False),
-            row.get('interchange_metro_lines', []),
-            False,  # 配合 CHECK 約束：第一階段先強制設為 False，假裝它還不是轉乘站
-            None    # 破解循環外鍵：第一階段先強制作為 NULL 寫入
-        ))
     
-    cols = ['station_id', 'name', 'lines', 'is_interchange_metro', 
-            'interchange_metro_lines', 'is_interchange_national_rail', 
-            'interchange_national_rail_station_id']
-    count = insert_many(cur, "metro_stations", cols, rows, "station_id")
-    print(f"  [OK]   metro_stations — {count} row(s) processed.")
+    cols = [
+        'station_id', 'name', 'lines', 
+        'is_interchange_metro', 'interchange_metro_lines', 
+        'is_interchange_national_rail', 'interchange_national_rail_station_id',
+        'adjacent_stations'
+    ]
+
+    def generate_rows(station_data):
+        for row in station_data:
+            
+            station_id = row.get('station_id')
+            if not station_id:
+                raise ValueError(f"資料異常：缺少必要的 station_id 欄位。原始資料：{row}")
+            
+            adjacent_stations_json = json.dumps(row.get('adjacent_stations', []))
+            
+            yield (
+                station_id,
+                row.get('name'),
+                row.get('lines') or [],
+                row.get('is_interchange_metro', False),
+                row.get('interchange_metro_lines') or [],
+                False,  
+                None,   
+                adjacent_stations_json
+            )
+
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'station_id'])
+    
+    sql = f"""
+        INSERT INTO metro_stations ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (station_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=1000)
+    
+    print(f"  [OK]   metro_stations — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_national_rail_stations(cur):
     data = load("national_rail_stations.json")
-    rows = []
-    for row in data:
-        rows.append((
-            row.get('station_id'),
-            row.get('name'),
-            row.get('lines', []),
-            row.get('is_interchange_national_rail', False),
-            row.get('interchange_national_rail_lines', []),
-            row.get('is_interchange_metro', False),
-            clean_val(row.get('interchange_metro_station_id'))
-        ))
-    
-    cols = ['station_id', 'name', 'lines', 'is_interchange_national_rail', 
-            'interchange_national_rail_lines', 'is_interchange_metro', 
-            'interchange_metro_station_id']
-    count = insert_many(cur, "national_rail_stations", cols, rows, "station_id")
-    print(f"  [OK]   national_rail_stations — {count} row(s) processed.")
+    cols = [
+        'station_id', 'name', 'lines', 
+        'is_interchange_national_rail', 'interchange_national_rail_lines', 
+        'is_interchange_metro', 'interchange_metro_station_id',
+        'adjacent_stations'
+    ]
 
-    # 破解循環外鍵：第二階段補回 metro_stations 的外鍵與 True 狀態
+    # 使用串流處理，避免資料過多記憶體溢出
+    def generate_rows(station_data):
+        for row in station_data:  
+            
+            # 提早失敗防護，避免沒有填 station_id 導致 PK 是 NULL
+            station_id = row.get('station_id')
+            if not station_id:
+                raise ValueError(f"資料異常：缺少必要的 station_id 欄位。原始資料：{row}")
+            
+            # 明確序列化 JSONB 欄位，避免型態轉換報錯
+            adjacent_stations_json = json.dumps(row.get('adjacent_stations', []))
+            
+            yield (
+                station_id,
+                row.get('name'),
+                row.get('lines') or [],  
+                row.get('is_interchange_national_rail', False),
+                row.get('interchange_national_rail_lines') or [],
+                row.get('is_interchange_metro', False),
+                clean_val(row.get('interchange_metro_station_id')),
+                adjacent_stations_json
+            )
+
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'station_id'])
+    
+    sql = f"""
+        INSERT INTO national_rail_stations ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (station_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=1000)
+    
+    print(f"  [OK]   national_rail_stations — {cur.rowcount} row(s) processed (UPSERT).")
+
     cur.execute("""
         UPDATE metro_stations ms
         SET interchange_national_rail_station_id = nrs.station_id,

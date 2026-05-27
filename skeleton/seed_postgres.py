@@ -150,7 +150,7 @@ def seed_national_rail_stations(cur):
             if not station_id:
                 raise ValueError(f"資料異常：缺少必要的 station_id 欄位。原始資料：{row}")
             
-            # 明確序列化 JSONB 欄位，避免型態轉換報錯
+            # 序列化 JSONB 欄位
             adjacent_stations_json = json.dumps(row.get('adjacent_stations', []))
             
             yield (
@@ -189,54 +189,120 @@ def seed_national_rail_stations(cur):
 
 
 # ── Batch B: Schedules & Layouts ─────────────────────────────────────────────
-def seed_metro_schedules(cur):
-    data = load("metro_schedules.json")
-    rows = []
-    for row in data:
-        stops_json       = json.dumps(row.get('stops_in_order', []))
-        travel_time_json = json.dumps(row.get('travel_time_from_origin_min', {}))
+def seed_national_rail_schedules(cur):
+    data = load("national_rail_schedules.json")
+    
+    # 安全的反向查表 (Reverse Lookup)
+    schedule_to_layout = {}
+    try:
+        layouts_data = load("national_rail_seat_layouts.json")
+        schedule_to_layout = {
+            sl["schedule_id"]: sl["layout_id"]
+            for sl in layouts_data
+            if sl.get("schedule_id") and sl.get("layout_id")
+        }
+    except Exception as e:
+        print(f"  [WARN] 無法載入 seat_layouts 建立對照表，將全數使用預設版型。原因: {e}")
 
-        rows.append((
-            row.get('schedule_id'),
-            row.get('line'),
-            row.get('direction'),
-            row.get('origin_station_id'),
-            row.get('destination_station_id'),
-            stops_json,
-            row.get('first_train_time'),
-            row.get('last_train_time'),
-            travel_time_json,
-            row.get('base_fare_usd'),        # Bug 1 修正：補上票價基本費
-            row.get('per_stop_rate_usd'),    # Bug 1 修正：補上每站費率
-            row.get('frequency_min'),
-            row.get('operates_on', []),
-        ))
+    DEFAULT_LAYOUT_ID = "SL01"
 
     cols = [
-        'schedule_id', 'line', 'direction',
+        'schedule_id', 'line', 'service_type', 'direction',
         'origin_station_id', 'destination_station_id',
-        'stops_in_order', 'first_train_time', 'last_train_time',
-        'travel_time_from_origin_min',
-        'base_fare_usd', 'per_stop_rate_usd',   # Bug 1 修正：補上對應欄位名稱
-        'frequency_min', 'operates_on',
+        'stops_in_order', 'skip_stations', 'travel_time_from_origin_min',
+        'first_train_time', 'last_train_time',
+        'fare_classes', 'frequency_min', 'operates_on',
+        'layout_id'
     ]
-    count = insert_many(cur, "metro_schedules", cols, rows, "schedule_id")
-    print(f"  [OK]   metro_schedules — {count} row(s) processed.")
+
+    def generate_rows(schedule_data):
+        for row in schedule_data:
+            
+            schedule_id = row.get('schedule_id')
+            origin_id = row.get('origin_station_id')
+            dest_id = row.get('destination_station_id')
+            
+            if not schedule_id or not origin_id or not dest_id:
+                raise ValueError(f"資料異常：缺少必要的排程或車站 ID。原始資料：{row}")
+
+            # Layout 查找與 Fallback
+            layout_id = schedule_to_layout.get(schedule_id)
+            if not layout_id:
+                layout_id = DEFAULT_LAYOUT_ID
+                # 只有在明確缺漏時才印出警告，避免洗版
+                # print(f"  [WARN] schedule_id='{schedule_id}' 無對應 layout，使用預設 '{DEFAULT_LAYOUT_ID}'。")
+
+            # JSONB 安全序列化防護 (確保不會產生 "null" 字串)
+            stops_json = json.dumps(row.get('stops_in_order') or [])
+            skip_json = json.dumps(row.get('skip_stations') or [])
+            travel_time_json = json.dumps(row.get('travel_time_from_origin_min') or {})
+            fare_json = json.dumps(row.get('fare_classes') or {})
+
+            yield (
+                schedule_id,
+                row.get('line'),
+                row.get('service_type') or 'normal',  
+                row.get('direction'),
+                origin_id,
+                dest_id,
+                stops_json,
+                skip_json,
+                travel_time_json,
+                clean_val(row.get('first_train_time')),  
+                clean_val(row.get('last_train_time')),   
+                fare_json,
+                row.get('frequency_min'),
+                row.get('operates_on') or [],            
+                layout_id
+            )
+
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'schedule_id'])
+    
+    sql = f"""
+        INSERT INTO national_rail_schedules ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (schedule_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=1000)
+    
+    print(f"  [OK]   national_rail_schedules — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_seat_layouts(cur):
     data = load("national_rail_seat_layouts.json")
-    rows = []
-    for row in data:
-        coaches_json = json.dumps(row.get('coaches', []))
-        rows.append((
-            row.get('layout_id'),
-            row.get('layout_name', 'Standard Template'),  # Bug 2 修正：description → layout_name
-            coaches_json,
-        ))
-    cols = ['layout_id', 'layout_name', 'coaches']       # Bug 2 修正：對應欄位名稱修正
-    count = insert_many(cur, "national_rail_seat_layouts", cols, rows, "layout_id")
-    print(f"  [OK]   national_rail_seat_layouts — {count} row(s) processed.")
+    
+    cols = ['layout_id', 'layout_name', 'coaches']
+
+    def generate_rows(layout_data):
+        for row in layout_data:
+            
+            layout_id = row.get('layout_id')
+            if not layout_id:
+                raise ValueError(f"資料異常：缺少必要的 layout_id 欄位。原始資料：{row}")
+            
+            coaches_raw = row.get('coaches') or []
+            coaches_json = json.dumps(coaches_raw)
+            
+            yield (
+                layout_id,
+                row.get('layout_name', 'Standard Template'),  
+                coaches_json
+            )
+
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'layout_id'])
+    
+    sql = f"""
+        INSERT INTO national_rail_seat_layouts ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (layout_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=100)
+    
+    print(f"  [OK]   national_rail_seat_layouts — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_national_rail_schedules(cur):

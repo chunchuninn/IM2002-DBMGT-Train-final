@@ -4,7 +4,7 @@
 // If you prefer Cypher-file seeding, implement your graph schema here.
 // Run with: python skeleton/seed_neo4j.py (or via the Neo4j Browser)
 
-// 1. 建立唯一約束，防止資料重覆亂掉
+// 1. 防止資料重覆亂掉
 CREATE CONSTRAINT FOR (s:MetroStation) REQUIRE s.station_id IS UNIQUE;
 CREATE CONSTRAINT FOR (s:NationalRailStation) REQUIRE s.station_id IS UNIQUE;
 
@@ -119,5 +119,5 @@ UNWIND [
 
 MATCH (m:MetroStation {station_id: transfer.metro_id})
 MATCH (r:NationalRailStation {station_id: transfer.rail_id})
-MERGE (m)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(r)
-MERGE (r)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(m);
+MERGE (m)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(r)
+MERGE (r)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(m);

@@ -17,6 +17,19 @@ import psycopg2
 from psycopg2.extras import execute_values
 from argon2 import PasswordHasher
 
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+    from argon2 import PasswordHasher
+except ImportError as e:
+    print(f"\n缺少必要套件 '{e.name}'")
+    print("系統可能尚未啟動虛擬環境，請依照作業系統執行以下指令：")
+    print("[macOS / Linux] source .venv/bin/activate")
+    print("[Windows]       .venv\\Scripts\\Activate.ps1")
+    print("若已啟動虛擬環境，請確認是否已安裝相依套件：")
+    print("pip install -r requirements.txt\n")
+    sys.exit(1)
+
 # ── resolve paths ────────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
@@ -25,7 +38,7 @@ DATA_DIR    = os.path.join(PROJECT_DIR, "train-mock-data")
 sys.path.insert(0, PROJECT_DIR)
 from skeleton import config as cfg
 
-# ✅ 效能優化：開發環境播種專用的低成本雜湊參數 (加速 Seeding 過程)
+# 效能優化：開發環境播種專用的低成本雜湊參數 (加速 Seeding 過程)
 ph = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1)
 
 
@@ -45,10 +58,7 @@ def connect():
 
 
 def insert_many(cur, table, columns, rows, pk_column):
-    """
-    Bulk insert with ON CONFLICT (pk_column) DO NOTHING.
-    Returns row count inserted.
-    """
+    """ Bulk insert with ON CONFLICT (pk_column) DO NOTHING. Returns row count inserted."""
     if not rows:
         return 0
     sql = (
@@ -58,11 +68,12 @@ def insert_many(cur, table, columns, rows, pk_column):
     execute_values(cur, sql, rows)
     return len(rows)
 
-
+# 避免空值資料
 def clean_val(val):
-    """✅ 髒資料防護：將 JSON 中的空字串轉為 Python 的 None，以對應 DB 的 NULL"""
-    if val == "":
-        return None
+    if isinstance(val, str):
+        val_stripped = val.strip()
+        if val_stripped == "" or val_stripped.lower() in ("null", "none"):
+            return None
     return val
 
 
@@ -77,8 +88,8 @@ def seed_metro_stations(cur):
             row.get('lines', []),
             row.get('is_interchange_metro', False),
             row.get('interchange_metro_lines', []),
-            False,  # ✅ 配合 CHECK 約束：第一階段先強制設為 False，假裝它還不是轉乘站
-            None    # ✅ 破解循環外鍵：第一階段先強制作為 NULL 寫入
+            False,  # 配合 CHECK 約束：第一階段先強制設為 False，假裝它還不是轉乘站
+            None    # 破解循環外鍵：第一階段先強制作為 NULL 寫入
         ))
     
     cols = ['station_id', 'name', 'lines', 'is_interchange_metro', 
@@ -108,14 +119,14 @@ def seed_national_rail_stations(cur):
     count = insert_many(cur, "national_rail_stations", cols, rows, "station_id")
     print(f"  [OK]   national_rail_stations — {count} row(s) processed.")
 
-    # ✅ 破解循環外鍵：第二階段補回 metro_stations 的外鍵與 True 狀態
+    # 破解循環外鍵：第二階段補回 metro_stations 的外鍵與 True 狀態
     cur.execute("""
         UPDATE metro_stations ms
         SET interchange_national_rail_station_id = nrs.station_id,
             is_interchange_national_rail = TRUE
         FROM national_rail_stations nrs
         WHERE ms.station_id = nrs.interchange_metro_station_id
-          AND ms.interchange_national_rail_station_id IS NULL;
+        AND ms.interchange_national_rail_station_id IS NULL;
     """)
     print(f"  [OK]   metro_stations FK linked — {cur.rowcount} row(s) updated.")
 
@@ -138,8 +149,8 @@ def seed_metro_schedules(cur):
             row.get('first_train_time'),
             row.get('last_train_time'),
             travel_time_json,
-            row.get('base_fare_usd'),        # ✅ Bug 1 修正：補上票價基本費
-            row.get('per_stop_rate_usd'),    # ✅ Bug 1 修正：補上每站費率
+            row.get('base_fare_usd'),        # Bug 1 修正：補上票價基本費
+            row.get('per_stop_rate_usd'),    # Bug 1 修正：補上每站費率
             row.get('frequency_min'),
             row.get('operates_on', []),
         ))
@@ -149,7 +160,7 @@ def seed_metro_schedules(cur):
         'origin_station_id', 'destination_station_id',
         'stops_in_order', 'first_train_time', 'last_train_time',
         'travel_time_from_origin_min',
-        'base_fare_usd', 'per_stop_rate_usd',   # ✅ Bug 1 修正：補上對應欄位名稱
+        'base_fare_usd', 'per_stop_rate_usd',   # Bug 1 修正：補上對應欄位名稱
         'frequency_min', 'operates_on',
     ]
     count = insert_many(cur, "metro_schedules", cols, rows, "schedule_id")
@@ -163,10 +174,10 @@ def seed_seat_layouts(cur):
         coaches_json = json.dumps(row.get('coaches', []))
         rows.append((
             row.get('layout_id'),
-            row.get('layout_name', 'Standard Template'),  # ✅ Bug 2 修正：description → layout_name
+            row.get('layout_name', 'Standard Template'),  # Bug 2 修正：description → layout_name
             coaches_json,
         ))
-    cols = ['layout_id', 'layout_name', 'coaches']       # ✅ Bug 2 修正：對應欄位名稱修正
+    cols = ['layout_id', 'layout_name', 'coaches']       # Bug 2 修正：對應欄位名稱修正
     count = insert_many(cur, "national_rail_seat_layouts", cols, rows, "layout_id")
     print(f"  [OK]   national_rail_seat_layouts — {count} row(s) processed.")
 
@@ -196,7 +207,7 @@ def seed_national_rail_schedules(cur):
         if layout_id is None:
             layout_id = DEFAULT_LAYOUT_ID
             print(f"  [WARN] schedule_id='{schedule_id}' 無對應 layout，"
-                  f"自動 fallback 至預設佈局 '{DEFAULT_LAYOUT_ID}'。")
+                f"自動 fallback 至預設佈局 '{DEFAULT_LAYOUT_ID}'。")
 
         stops_json       = json.dumps(row.get('stops_in_order', []))
         skip_json        = json.dumps(row.get('skip_stations', []))
@@ -218,7 +229,7 @@ def seed_national_rail_schedules(cur):
             fare_json,
             row.get('frequency_min'),
             row.get('operates_on', []),
-            layout_id,      # ✅ 從反向字典查找，不再依賴 JSON 中不存在的欄位
+            layout_id,      # 從反向字典查找，不再依賴 JSON 中不存在的欄位
         ))
 
     cols = [
@@ -247,7 +258,7 @@ def seed_users(cur):
         hashed_password = ph.hash(raw_password) if raw_password else None
         hashed_answer   = ph.hash(raw_answer)   if raw_answer   else None
 
-        # ✅ Bug 3 修正：users 表不含 secret_question / secret_answer
+        # Bug 3 修正：users 表不含 secret_question / secret_answer
         user_rows.append((
             user_id,
             row.get('full_name'),
@@ -438,11 +449,11 @@ def main():
         seed_feedback(cur)
 
         conn.commit()
-        print("\n✅  All done. Database seeded successfully.")
+        print("\nAll done. Database seeded successfully.")
 
     except Exception as e:
         conn.rollback()
-        print(f"\n❌  Error during seeding — transaction rolled back.\n    {type(e).__name__}: {e}")
+        print(f"\nError during seeding — transaction rolled back.\n    {type(e).__name__}: {e}")
         raise
     finally:
         cur.close()

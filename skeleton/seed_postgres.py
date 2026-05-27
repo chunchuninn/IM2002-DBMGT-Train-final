@@ -189,10 +189,106 @@ def seed_national_rail_stations(cur):
 
 
 # ── Batch B: Schedules & Layouts ─────────────────────────────────────────────
+def seed_metro_schedules(cur):
+    data = load("metro_schedules.json")
+    
+    cols = [
+        'schedule_id', 'line', 'direction',
+        'origin_station_id', 'destination_station_id',
+        'stops_in_order', 'first_train_time', 'last_train_time',
+        'travel_time_from_origin_min',
+        'base_fare_usd', 'per_stop_rate_usd',   
+        'frequency_min', 'operates_on'
+    ]
+
+    # 使用串流處理，避免班次過多導致記憶體溢出
+    def generate_rows(schedule_data):
+        for row in schedule_data:
+            
+            # 提早失敗防護，避免沒有填 station_id 導致 PK 是 NULL
+            schedule_id = row.get('schedule_id')
+            origin_id = row.get('origin_station_id')
+            dest_id = row.get('destination_station_id')
+            
+            if not schedule_id or not origin_id or not dest_id:
+                raise ValueError(f"資料異常：缺少必要的排程或車站 ID。原始資料：{row}")
+            
+            # 序列化 JSONB 欄位
+            stops_json = json.dumps(row.get('stops_in_order', []))
+            travel_time_json = json.dumps(row.get('travel_time_from_origin_min', {}))
+
+            yield (
+                schedule_id,
+                row.get('line'),
+                row.get('direction'),
+                origin_id,
+                dest_id,
+                stops_json,
+                clean_val(row.get('first_train_time')),  # 防護空字串導致的 TIME 型態轉換錯誤
+                clean_val(row.get('last_train_time')),   # 防護空字串
+                travel_time_json,
+                row.get('base_fare_usd'),        
+                row.get('per_stop_rate_usd'),    
+                row.get('frequency_min'),
+                row.get('operates_on') or [],            # 防護明確的 null 導致違反 NOT NULL
+            )
+
+    # 確保 JSON 修改能覆寫舊資料 (UPSERT)
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'schedule_id'])
+    
+    sql = f"""
+        INSERT INTO metro_schedules ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (schedule_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=1000)
+    
+    print(f"  [OK]   metro_schedules — {cur.rowcount} row(s) processed (UPSERT).")
+
+
+def seed_seat_layouts(cur):
+    data = load("national_rail_seat_layouts.json")
+    
+    cols = ['layout_id', 'layout_name', 'coaches']
+
+    def generate_rows(layout_data):
+        for row in layout_data:
+            
+            layout_id = row.get('layout_id')
+            if not layout_id:
+                raise ValueError(f"資料異常：缺少必要的 layout_id 欄位。原始資料：{row}")
+            
+            coaches_raw = row.get('coaches') or []
+            coaches_json = json.dumps(coaches_raw)
+            
+            yield (
+                layout_id,
+                row.get('layout_name', 'Standard Template'),  
+                coaches_json
+            )
+
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'layout_id'])
+    
+    sql = f"""
+        INSERT INTO national_rail_seat_layouts ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (layout_id) DO UPDATE
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_rows(data), page_size=100)
+    
+    print(f"  [OK]   national_rail_seat_layouts — {cur.rowcount} row(s) processed (UPSERT).")
+
+
 def seed_national_rail_schedules(cur):
     data = load("national_rail_schedules.json")
     
+    # ---------------------------------------------------------
     # 安全的反向查表 (Reverse Lookup)
+    # ---------------------------------------------------------
     schedule_to_layout = {}
     try:
         layouts_data = load("national_rail_seat_layouts.json")
@@ -215,9 +311,11 @@ def seed_national_rail_schedules(cur):
         'layout_id'
     ]
 
+    # 導入 Generator 串流處理，保護記憶體
     def generate_rows(schedule_data):
         for row in schedule_data:
             
+            # 提早失敗防護：確保 PK 與 FK 存在
             schedule_id = row.get('schedule_id')
             origin_id = row.get('origin_station_id')
             dest_id = row.get('destination_station_id')
@@ -268,103 +366,6 @@ def seed_national_rail_schedules(cur):
     execute_values(cur, sql, generate_rows(data), page_size=1000)
     
     print(f"  [OK]   national_rail_schedules — {cur.rowcount} row(s) processed (UPSERT).")
-
-
-def seed_seat_layouts(cur):
-    data = load("national_rail_seat_layouts.json")
-    
-    cols = ['layout_id', 'layout_name', 'coaches']
-
-    def generate_rows(layout_data):
-        for row in layout_data:
-            
-            layout_id = row.get('layout_id')
-            if not layout_id:
-                raise ValueError(f"資料異常：缺少必要的 layout_id 欄位。原始資料：{row}")
-            
-            coaches_raw = row.get('coaches') or []
-            coaches_json = json.dumps(coaches_raw)
-            
-            yield (
-                layout_id,
-                row.get('layout_name', 'Standard Template'),  
-                coaches_json
-            )
-
-    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'layout_id'])
-    
-    sql = f"""
-        INSERT INTO national_rail_seat_layouts ({', '.join(cols)})
-        VALUES %s
-        ON CONFLICT (layout_id) DO UPDATE
-        SET {update_set_clause}
-    """
-
-    execute_values(cur, sql, generate_rows(data), page_size=100)
-    
-    print(f"  [OK]   national_rail_seat_layouts — {cur.rowcount} row(s) processed (UPSERT).")
-
-
-def seed_national_rail_schedules(cur):
-    data = load("national_rail_schedules.json")
-
-    # ── 修正：national_rail_schedules.json 不含 layout_id，
-    #    但 national_rail_seat_layouts.json 含有 schedule_id。
-    #    從 layouts 反向建立對照字典：{ schedule_id → layout_id }
-    layouts_data      = load("national_rail_seat_layouts.json")
-    schedule_to_layout = {
-        sl["schedule_id"]: sl["layout_id"]
-        for sl in layouts_data
-        if sl.get("schedule_id")
-    }
-
-    rows = []
-    for row in data:
-        schedule_id = row.get('schedule_id')
-
-        # 查找對應的 layout_id
-        # 若查無對應（如 NR_SCH05），fallback 至 SL01 預設標準車型
-        # 這符合 1:N 共享佈局架構的設計意圖：多個班次可共用同一套車廂樣板
-        DEFAULT_LAYOUT_ID = "SL01"
-        layout_id = schedule_to_layout.get(schedule_id)
-        if layout_id is None:
-            layout_id = DEFAULT_LAYOUT_ID
-            print(f"  [WARN] schedule_id='{schedule_id}' 無對應 layout，"
-                f"自動 fallback 至預設佈局 '{DEFAULT_LAYOUT_ID}'。")
-
-        stops_json       = json.dumps(row.get('stops_in_order', []))
-        skip_json        = json.dumps(row.get('skip_stations', []))
-        travel_time_json = json.dumps(row.get('travel_time_from_origin_min', {}))
-        fare_json        = json.dumps(row.get('fare_classes', {}))
-
-        rows.append((
-            schedule_id,
-            row.get('line'),
-            row.get('service_type', 'normal'),
-            row.get('direction'),
-            row.get('origin_station_id'),
-            row.get('destination_station_id'),
-            stops_json,
-            skip_json,
-            travel_time_json,
-            row.get('first_train_time'),
-            row.get('last_train_time'),
-            fare_json,
-            row.get('frequency_min'),
-            row.get('operates_on', []),
-            layout_id,      # 從反向字典查找，不再依賴 JSON 中不存在的欄位
-        ))
-
-    cols = [
-        'schedule_id', 'line', 'service_type', 'direction',
-        'origin_station_id', 'destination_station_id',
-        'stops_in_order', 'skip_stations', 'travel_time_from_origin_min',
-        'first_train_time', 'last_train_time',
-        'fare_classes', 'frequency_min', 'operates_on',
-        'layout_id',
-    ]
-    count = insert_many(cur, "national_rail_schedules", cols, rows, "schedule_id")
-    print(f"  [OK]   national_rail_schedules — {count} row(s) processed.")
 
 
 # ── Batch A: Users & Credentials (安全解耦) ──────────────────────────────────

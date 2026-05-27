@@ -452,132 +452,233 @@ def seed_users(cur):
 
 # ── Batch C: Transactions & Polymorphic ──────────────────────────────────────
 def seed_national_rail_bookings(cur):
+    """
+    匯入台鐵訂單交易資料。
+    包含 OOM 防護 (Generator)、UPSERT 狀態同步更新，以及嚴謹的核心鍵值 Fail-Fast 驗證。
+    """
     data = load("bookings.json")
-    rows = []
-    for row in data:
-        # ✅ Bug 4 修正：使用 JSON 中實際存在的 key，對應 schema 正確欄位名稱
-        rows.append((
-            row.get('booking_id'),
-            row.get('user_id'),
-            row.get('schedule_id'),
-            row.get('origin_station_id'),
-            row.get('destination_station_id'),
-            clean_val(row.get('travel_date')),
-            clean_val(row.get('departure_time')),
-            row.get('ticket_type'),                 # ✅ 補上 ticket_type
-            row.get('fare_class'),
-            clean_val(row.get('coach')),            # ✅ coach（非 coach_number）
-            clean_val(row.get('seat_id')),          # ✅ seat_id（非 seat_number）
-            row.get('stops_travelled'),             # ✅ 補上 stops_travelled
-            row.get('amount_usd'),                  # ✅ amount_usd（非 price）
-            row.get('status'),
-            row.get('booked_at'),
-            clean_val(row.get('travelled_at')),     # ✅ 補上 travelled_at
-        ))
+    
     cols = [
         'booking_id', 'user_id', 'schedule_id',
         'origin_station_id', 'destination_station_id',
         'travel_date', 'departure_time',
         'ticket_type', 'fare_class',
-        'coach', 'seat_id',                         # ✅ 正確欄位名稱
+        'coach', 'seat_id',
         'stops_travelled',
-        'amount_usd',                               # ✅ 正確欄位名稱
-        'status', 'booked_at', 'travelled_at',
+        'amount_usd',
+        'status', 'booked_at', 'travelled_at'
     ]
-    count = insert_many(cur, "national_rail_bookings", cols, rows, "booking_id")
-    print(f"  [OK]   national_rail_bookings — {count} row(s) processed.")
+
+    # 使用 Generator 串流處理，避免交易資料庫過大導致記憶體溢出
+    def generate_bookings(booking_data):
+        for row in booking_data:
+            
+            # 提早失敗防護：訂單的主鍵與所有關聯外鍵絕對不能遺失
+            booking_id = row.get('booking_id')
+            user_id = row.get('user_id')
+            schedule_id = row.get('schedule_id')
+            origin_id = row.get('origin_station_id')
+            dest_id = row.get('destination_station_id')
+            
+            # 若任一核心 ID 缺失，立刻阻擋，避免拋出難以追蹤的 Foreign Key Violation
+            if not all([booking_id, user_id, schedule_id, origin_id, dest_id]):
+                raise ValueError(f"交易資料異常：缺少核心訂單或關聯 ID。原始資料：{row}")
+            
+            yield (
+                booking_id,
+                user_id,
+                schedule_id,
+                origin_id,
+                dest_id,
+                clean_val(row.get('travel_date')),
+                clean_val(row.get('departure_time')),
+                row.get('ticket_type'),
+                row.get('fare_class'),
+                clean_val(row.get('coach')),            # 退票或自由座可能為 null
+                clean_val(row.get('seat_id')),          # 退票或自由座可能為 null
+                row.get('stops_travelled'),
+                row.get('amount_usd'),
+                row.get('status'),
+                row.get('booked_at'),
+                clean_val(row.get('travelled_at'))      # 尚未搭乘或取消的訂單為 null
+            )
+
+    # 組裝 UPSERT 語句，確保 JSON 中的狀態改變 (如 confirmed -> cancelled) 能夠正確更新至 DB
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'booking_id'])
+    
+    sql = f"""
+        INSERT INTO national_rail_bookings ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (booking_id) DO UPDATE 
+        SET {update_set_clause}
+    """
+
+    # 執行批次寫入，page_size=1000 確保無論幾十萬筆訂單，都會以 1000 筆為單位穩定寫入
+    execute_values(cur, sql, generate_bookings(data), page_size=1000)
+    
+    print(f"  [OK]   national_rail_bookings — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_metro_travels(cur):
+    """
+    匯入捷運搭乘紀錄。
+    包含 OOM 記憶體防護、核心 ID 的 Fail-Fast 驗證，以及 UPSERT 狀態同步更新。
+    """
     data = load("metro_travel_history.json")
-    rows = []
-    for row in data:
-        # ✅ Bug 5 修正：使用 JSON 中實際存在的 key，補齊所有 schema 欄位
-        rows.append((
-            row.get('trip_id'),
-            row.get('user_id'),
-            row.get('schedule_id'),                 # ✅ 補上 schedule_id
-            row.get('origin_station_id'),           # ✅ origin（非 entry_station_id）
-            row.get('destination_station_id'),      # ✅ destination（非 exit_station_id）
-            clean_val(row.get('travel_date')),      # ✅ 補上 travel_date
-            row.get('ticket_type', 'single'),
-            clean_val(row.get('day_pass_ref')),     # ✅ 補上 day_pass_ref
-            row.get('stops_travelled'),             # ✅ 補上 stops_travelled
-            row.get('amount_usd'),                  # ✅ amount_usd（非 fare）
-            row.get('status'),
-            clean_val(row.get('purchased_at')),     # ✅ purchased_at（非 entry_time）
-            clean_val(row.get('travelled_at')),     # ✅ travelled_at（非 exit_time）
-        ))
+    
     cols = [
         'trip_id', 'user_id', 'schedule_id',
         'origin_station_id', 'destination_station_id',
         'travel_date', 'ticket_type', 'day_pass_ref',
         'stops_travelled', 'amount_usd',
-        'status', 'purchased_at', 'travelled_at',
+        'status', 'purchased_at', 'travelled_at'
     ]
-    count = insert_many(cur, "metro_travels", cols, rows, "trip_id")
-    print(f"  [OK]   metro_travels — {count} row(s) processed.")
+
+    def generate_travels(travel_data):
+        for row in travel_data:
+            # 提早失敗防護：確保所有的主鍵與關聯外鍵皆存在
+            trip_id = row.get('trip_id')
+            user_id = row.get('user_id')
+            schedule_id = row.get('schedule_id')
+            origin_id = row.get('origin_station_id')
+            dest_id = row.get('destination_station_id')
+            
+            if not all([trip_id, user_id, schedule_id, origin_id, dest_id]):
+                raise ValueError(f"捷運搭乘紀錄異常：缺少核心主鍵或外鍵 ID。原始資料：{row}")
+
+            yield (
+                trip_id,
+                user_id,
+                schedule_id,
+                origin_id,
+                dest_id,
+                clean_val(row.get('travel_date')),
+                row.get('ticket_type', 'single'),
+                clean_val(row.get('day_pass_ref')),     # 一日票參照可能為 null
+                row.get('stops_travelled'),             # 購買一日票當下可能為 null
+                row.get('amount_usd'),
+                row.get('status'),
+                clean_val(row.get('purchased_at')),     # 使用一日票搭乘時為 null
+                clean_val(row.get('travelled_at'))      # 尚未搭乘或取消時為 null
+            )
+
+    # 組裝 UPSERT 語句，確保 status (如 completed / cancelled) 能覆寫更新
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'trip_id'])
+    sql = f"""
+        INSERT INTO metro_travels ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (trip_id) DO UPDATE 
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_travels(data), page_size=1000)
+    print(f"  [OK]   metro_travels — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_payments(cur):
+    """
+    匯入付款紀錄。
+    包含多型關聯 (Polymorphic) 的嚴謹防護，確保絕對符合 Exclusive Arc 限制。
+    """
     data = load("payments.json")
-    rows = []
-    for row in data:
-        booking_id = row.get('booking_id', '')
-        nr_id, mt_id = None, None
-
-        if booking_id.startswith('BK'):
-            nr_id = booking_id
-        elif booking_id.startswith('MT'):
-            mt_id = booking_id
-        else:
-            raise ValueError(f"Payments 包含無法識別的訂單前綴: {booking_id}")
-
-        rows.append((
-            row.get('payment_id'),
-            nr_id,
-            mt_id,
-            row.get('amount_usd'),          # ✅ Bug 6 修正：amount_usd（非 amount）
-            row.get('method'),              # ✅ Bug 6 修正：method（非 payment_method）
-            row.get('status'),              # ✅ Bug 6 修正：status（非 payment_status）
-            clean_val(row.get('paid_at')),  # ✅ Bug 6 修正：paid_at（非 transaction_date）
-        ))
+    
     cols = [
         'payment_id', 'national_rail_booking_id', 'metro_travel_id',
-        'amount_usd', 'method', 'status', 'paid_at',  # ✅ Bug 6 修正：正確欄位名稱
+        'amount_usd', 'method', 'status', 'paid_at'
     ]
-    count = insert_many(cur, "payments", cols, rows, "payment_id")
-    print(f"  [OK]   payments — {count} row(s) processed.")
+
+    def generate_payments(payment_data):
+        for row in payment_data:
+            payment_id = row.get('payment_id')
+            booking_id = row.get('booking_id')
+            
+            # Fail-Fast 防護：付款 ID 與對應的訂單 ID 絕對不可少
+            if not payment_id or not booking_id:
+                raise ValueError(f"付款資料異常：缺少 payment_id 或對應的 booking_id。原始資料：{row}")
+
+            nr_id, mt_id = None, None
+            # 多型外鍵拆分路由
+            if booking_id.startswith('BK'):
+                nr_id = booking_id
+            elif booking_id.startswith('MT'):
+                mt_id = booking_id
+            else:
+                raise ValueError(f"Payments 包含無法識別的訂單前綴: {booking_id}")
+
+            yield (
+                payment_id,
+                nr_id,
+                mt_id,
+                row.get('amount_usd'),
+                row.get('method'),
+                row.get('status'),
+                clean_val(row.get('paid_at')) # pending/failed 狀態時可能為 null
+            )
+
+    # UPSERT 保證如果訂單退費 (status: paid -> refunded)，能即時更新資料庫狀態
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'payment_id'])
+    sql = f"""
+        INSERT INTO payments ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (payment_id) DO UPDATE 
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_payments(data), page_size=1000)
+    print(f"  [OK]   payments — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 def seed_feedback(cur):
+    """
+    匯入意見回饋紀錄。
+    允許使用者修改回饋內容，重跑腳本即可自動套用 UPSERT 更新。
+    """
     data = load("feedback.json")
-    rows = []
-    for row in data:
-        booking_id = row.get('booking_id', '')
-        nr_id, mt_id = None, None
-        
-        # ✅ 多型關聯嚴格檢查
-        if booking_id.startswith('BK'):
-            nr_id = booking_id
-        elif booking_id.startswith('MT'):
-            mt_id = booking_id
-        else:
-            raise ValueError(f"Feedback 包含無法識別的訂單前綴: {booking_id}")
+    
+    cols = [
+        'feedback_id', 'national_rail_booking_id', 'metro_travel_id', 
+        'user_id', 'rating', 'comment', 'submitted_at'
+    ]
+
+    def generate_feedback(feedback_data):
+        for row in feedback_data:
+            feedback_id = row.get('feedback_id')
+            user_id = row.get('user_id')
+            booking_id = row.get('booking_id')
             
-        rows.append((
-            row.get('feedback_id'),
-            nr_id,
-            mt_id,
-            row.get('user_id'),
-            row.get('rating'),
-            clean_val(row.get('comment')),
-            row.get('submitted_at')
-        ))
-    cols = ['feedback_id', 'national_rail_booking_id', 'metro_travel_id', 
-            'user_id', 'rating', 'comment', 'submitted_at']
-    count = insert_many(cur, "feedback", cols, rows, "feedback_id")
-    print(f"  [OK]   feedback — {count} row(s) processed.")
+            # 確保評價具有追溯性
+            if not feedback_id or not user_id or not booking_id:
+                raise ValueError(f"評價資料異常：缺少 feedback_id, user_id 或 booking_id。原始資料：{row}")
+
+            nr_id, mt_id = None, None
+            if booking_id.startswith('BK'):
+                nr_id = booking_id
+            elif booking_id.startswith('MT'):
+                mt_id = booking_id
+            else:
+                raise ValueError(f"Feedback 包含無法識別的訂單前綴: {booking_id}")
+                
+            yield (
+                feedback_id,
+                nr_id,
+                mt_id,
+                user_id,
+                row.get('rating'),
+                clean_val(row.get('comment')),       # comment 允許為 null
+                clean_val(row.get('submitted_at')) 
+            )
+
+    # UPSERT 保證使用者若修改了評價分數 (rating) 或是留下了新的評論 (comment)，皆能同步至 DB
+    update_set_clause = ", ".join([f"{col} = EXCLUDED.{col}" for col in cols if col != 'feedback_id'])
+    sql = f"""
+        INSERT INTO feedback ({', '.join(cols)})
+        VALUES %s
+        ON CONFLICT (feedback_id) DO UPDATE 
+        SET {update_set_clause}
+    """
+
+    execute_values(cur, sql, generate_feedback(data), page_size=1000)
+    print(f"  [OK]   feedback — {cur.rowcount} row(s) processed (UPSERT).")
 
 
 # ── main ─────────────────────────────────────────────────────────────────────

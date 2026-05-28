@@ -68,7 +68,70 @@ def query_shortest_route(
         dict with keys: found, origin_id, destination_id,
                         total_time_min, path (list of station dicts), legs
     """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    # 1. 根據傳進來的 network 參數，決定演算法可以走哪些線
+    # 如果指定 metro，就只能走捷運線；指定 rail 就只能走鐵路；auto 則是全部都能走（包含轉乘）
+    if network == "metro":
+        rel_types = "METRO_LINK"
+    elif network == "rail":
+        rel_types = "RAIL_LINK"
+    else:
+        rel_types = "METRO_LINK|RAIL_LINK|TRANSFER_TO"
+
+    # 2. 撰寫 APOC Dijkstra 語法
+    cypher_query = f"""
+    MATCH (start {{station_id: $origin}}), (end {{station_id: $dest}})
+    CALL apoc.algo.dijkstra(start, end, '{rel_types}', 'travel_time_min') YIELD path, weight
+    RETURN path, weight
+    """
+
+    # 3. 預設找不到時的基本回傳格式
+    response = {
+        "found": False,
+        "origin_id": origin_id,
+        "destination_id": destination_id,
+        "total_time_min": 0,
+        "path": [],
+        "legs": []
+    }
+
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run(cypher_query, origin=origin_id, dest=destination_id)
+            record = result.single()
+            
+        # 如果資料庫有算出一條路徑
+        if record and record["path"]:
+            response["found"] = True
+            response["total_time_min"] = int(record["weight"]) # 權重就是總時間
+                
+            neo4j_path = record["path"]
+                
+        # 4. 拆解路徑中的「所有車站 (Nodes)」放進 path
+        station_list = []
+        for node in neo4j_path.nodes:
+            station_list.append({
+                "station_id": node["station_id"],
+                "name": node["name"]
+                    })
+        response["path"] = station_list
+                
+        # 5. 拆解路徑中的「每一段搭乘/換乘 (Relationships)」放進 legs
+        leg_list = []
+        for rel in neo4j_path.relationships:
+         # 判斷這是一段什麼樣的連線
+                    rel_type = rel.type
+                    line_info = rel.get("line") if rel.get("line") else rel.get("type", "Unknown")
+                    
+                    leg_list.append({
+                        "from_station_id": rel.start_node["station_id"],
+                        "to_station_id": rel.end_node["station_id"],
+                        "type": rel_type,
+                        "line_or_type": line_info,
+                        "duration_min": rel["travel_time_min"]
+                    })
+        response["legs"] = leg_list
+
+    return response
 
 
 # ── CHEAPEST ROUTE (Dijkstra by fare) ────────────────────────────────────────
@@ -163,4 +226,29 @@ def query_station_connections(station_id: str) -> list[dict]:
     Args:
         station_id: e.g. "MS01" or "NR01"
     """
-    raise NotImplementedError("TODO: implement after designing your graph schema")
+    cypher_query = """
+    MATCH (start {station_id: $st_id})-[r]-(neighbor)
+    WHERE type(r) IN ['METRO_LINK', 'RAIL_LINK', 'TRANSFER_TO']
+    RETURN neighbor.station_id AS id, 
+           neighbor.name AS name, 
+           type(r) AS rel_type,
+           COALESCE(r.line, r.type) AS line_or_type, 
+           r.travel_time_min AS time
+    """
+    
+    connections = []
+    
+    with _driver() as driver:
+        with driver.session() as session:
+            result = session.run(cypher_query, st_id=station_id)
+            
+            for record in result:
+                connections.append({
+                    "station_id": record["id"],
+                    "name": record["name"],
+                    "connection_type": record["rel_type"], # 是捷運、國鐵還是轉乘
+                    "line": record["line_or_type"],        # M1, NR1 或 Walkway
+                    "travel_time_min": record["time"]     
+                })
+                
+    return connections

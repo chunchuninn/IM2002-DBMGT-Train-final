@@ -4,7 +4,7 @@
 // If you prefer Cypher-file seeding, implement your graph schema here.
 // Run with: python skeleton/seed_neo4j.py (or via the Neo4j Browser)
 
-// 1. 防止資料重覆亂掉
+// 1. 建立唯一約束，防止資料重覆亂掉
 CREATE CONSTRAINT FOR (s:MetroStation) REQUIRE s.station_id IS UNIQUE;
 CREATE CONSTRAINT FOR (s:NationalRailStation) REQUIRE s.station_id IS UNIQUE;
 
@@ -30,7 +30,7 @@ MERGE (:MetroStation {station_id: "MS16", name: "Hilltop",         lines: ["M4"]
 MERGE (:MetroStation {station_id: "MS17", name: "Broadmoor",       lines: ["M1","M4"]})
 MERGE (:MetroStation {station_id: "MS18", name: "Sunnyvale",       lines: ["M2"]})
 MERGE (:MetroStation {station_id: "MS19", name: "Redwood",         lines: ["M3"]})
-MERGE (:MetroStation {station_id: "MS20", name: "Thornton",        lines: ["M1"]})
+MERGE (:MetroStation {station_id: "MS20", name: "Thornton",        lines: ["M1"]});
 
 // =============================================
 // 3. NATIONAL RAIL STATIONS (10 nodes)
@@ -44,7 +44,7 @@ MERGE (:NationalRailStation {station_id: "NR06", name: "Bridgeport",         lin
 MERGE (:NationalRailStation {station_id: "NR07", name: "Ferndale Halt",      lines: ["NR2"]})
 MERGE (:NationalRailStation {station_id: "NR08", name: "Coalport",           lines: ["NR2"]})
 MERGE (:NationalRailStation {station_id: "NR09", name: "Dunmore",            lines: ["NR2"]})
-MERGE (:NationalRailStation {station_id: "NR10", name: "Langford End",       lines: ["NR2"]})
+MERGE (:NationalRailStation {station_id: "NR10", name: "Langford End",       lines: ["NR2"]});
 
 // =================================================================
 // 4. 建立捷運雙向連線 (METRO_LINK)
@@ -119,5 +119,5 @@ UNWIND [
 
 MATCH (m:MetroStation {station_id: transfer.metro_id})
 MATCH (r:NationalRailStation {station_id: transfer.rail_id})
-MERGE (m)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(r)
-MERGE (r)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(m);
+MERGE (m)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(r)
+MERGE (r)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(m);

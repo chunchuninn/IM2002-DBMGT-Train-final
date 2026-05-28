@@ -178,7 +178,6 @@ CREATE TABLE metro_schedules (
         ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-
 -- ------------------------------------------------------------
 -- 2.2 national_rail_seat_layouts
 -- coaches 為深層巢狀陣列（車廂 → 座位清單），使用 JSONB。
@@ -195,6 +194,7 @@ CREATE TABLE national_rail_seat_layouts (
     CONSTRAINT chk_coaches_is_array 
         CHECK (jsonb_typeof(coaches) = 'array')
 );
+
 
 -- ------------------------------------------------------------
 -- 2.3 national_rail_schedules

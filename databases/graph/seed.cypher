@@ -119,6 +119,5 @@ UNWIND [
 
 MATCH (m:MetroStation {station_id: transfer.metro_id})
 MATCH (r:NationalRailStation {station_id: transfer.rail_id})
-
-MERGE (m)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(r)
-MERGE (r)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(m);
+MERGE (m)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(r)
+MERGE (r)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(m);

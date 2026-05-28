@@ -59,7 +59,7 @@ DROP TABLE IF EXISTS users                       CASCADE;
 CREATE TABLE users (
     user_id          VARCHAR(20)   PRIMARY KEY,
     full_name        VARCHAR(255)  NOT NULL,
-    email VARCHAR(255) NOT NULL UNIQUE CHECK (email LIKE '%@%'),
+    email            VARCHAR(255) NOT NULL UNIQUE CHECK (email LIKE '%@%'),
     phone            VARCHAR(20),
     date_of_birth    DATE,
     registered_at    TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

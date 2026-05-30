@@ -255,6 +255,9 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
 
+from argon2 import PasswordHasher
+ph = PasswordHasher()
+
 def register_user(
     email: str,
     first_name: str,
@@ -271,8 +274,62 @@ def register_user(
     NOTE: passwords are stored as plain text here intentionally for teaching
     purposes. In production, replace with a salted hash (e.g. bcrypt).
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    conn = _connect()
+    conn.autocommit = False  # We need manual transaction control for two-table insert
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
+            # 1. Check if email already exists (including deactivated accounts)
+            cur.execute("SELECT user_id, is_active FROM users WHERE email = %s", (email,))
+            existing = cur.fetchone()
+            if existing:
+                if existing["is_active"]:
+                    return False, "This email is already registered."
+                else:
+                    return False, "This account has been deactivated. Please contact support."
+
+            # 2. Generate a new user_id based on the current max
+            cur.execute("SELECT user_id FROM users ORDER BY user_id DESC LIMIT 1")
+            last = cur.fetchone()
+            if last:
+                # Extract the number from e.g. "RU012" and increment
+                last_num = int(last["user_id"].replace("RU", ""))
+                new_num = last_num + 1
+            else:
+                new_num = 1
+            user_id = f"RU{new_num:03d}"
+
+            # 3. Insert into users table
+            cur.execute("""
+                INSERT INTO users (user_id, full_name, email, date_of_birth, is_active)
+                VALUES (%s, %s, %s, %s, TRUE)
+            """, (
+                user_id,
+                f"{first_name} {surname}",
+                email,
+                f"{year_of_birth}-01-01",  # Store year only as a date
+            ))
+
+            # 4. Hash password and secret answer before storing
+            stored_hash        = ph.hash(password)
+            secret_answer_hash = ph.hash(secret_answer.strip().lower())
+            # secret_answer is lowercased for case-insensitive verification later
+
+            # 5. Insert into user_credential table
+            cur.execute("""
+                INSERT INTO user_credential
+                    (user_id, stored_hash, secret_question, secret_answer_hash)
+                VALUES (%s, %s, %s, %s)
+            """, (user_id, stored_hash, secret_question, secret_answer_hash))
+
+        conn.commit()
+        return True, user_id
+
+    except Exception as e:
+        conn.rollback()  # Roll back both inserts if anything fails
+        return False, str(e)
+    finally:
+        conn.close()
 
 def login_user(email: str, password: str) -> Optional[dict]:
     """

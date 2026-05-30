@@ -126,6 +126,9 @@ def query_shortest_route(
 
                 # 5. Extract each relationship (leg) from the path.
                 #    Each leg describes one segment: which line was taken and how long it took.
+                path_ids = [s["station_id"] for s in station_list]
+                # path_ids stores the correct travel order so we can fix leg direction below.
+
                 leg_list = []
                 for rel in neo4j_path.relationships:
                     rel_type = rel.type
@@ -133,9 +136,18 @@ def query_shortest_route(
                     # TRANSFER_TO has no 'line', so fall back to its 'type' property (e.g. "Walkway").
                     line_info = rel.get("line") if rel.get("line") else rel.get("type", "Unknown")
 
+                    start_id = rel.start_node["station_id"]
+                    end_id   = rel.end_node["station_id"]
+
+                    # Neo4j may store edges in either direction regardless of travel order.
+                    # We align the leg direction with the actual path by checking which node
+                    # appears earlier in path_ids. If start comes after end, flip them.
+                    if path_ids.index(start_id) > path_ids.index(end_id):
+                        start_id, end_id = end_id, start_id
+
                     leg_list.append({
-                        "from_station_id": rel.start_node["station_id"],
-                        "to_station_id":   rel.end_node["station_id"],
+                        "from_station_id": start_id,
+                        "to_station_id":   end_id,
                         "type":            rel_type,
                         "line_or_type":    line_info,
                         "duration_min":    rel["travel_time_min"]

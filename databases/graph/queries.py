@@ -411,6 +411,9 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                 response["stations"] = station_list
 
                 # 2. Parse legs and locate precise interchange points
+                path_ids = [s["station_id"] for s in station_list]
+                # path_ids stores the correct travel order so we can fix leg direction below.
+
                 leg_list = []
                 interchange_set = set() # Use a set to avoid duplicate boundary stations
 
@@ -418,19 +421,25 @@ def query_interchange_path(origin_id: str, destination_id: str) -> dict:
                     rel_type = rel.type
                     line_info = rel.get("line") if rel.get("line") else rel.get("type", "Unknown")
 
-                    # BUG FIX: If the relationship is a physical walkway transfer,
-                    # both flanking stations are the true interchange hubs!
+                    # If the relationship is a physical walkway transfer, both flanking stations are the true interchange hubs!
                     if rel_type == "TRANSFER_TO":
-                        interchange_set.add(rel.start_node["station_id"])
-                        interchange_set.add(rel.end_node["station_id"])
+                            interchange_set.add(rel.start_node["station_id"])
+                            interchange_set.add(rel.end_node["station_id"])
+
+                    start_id = rel.start_node["station_id"]
+                    end_id   = rel.end_node["station_id"]
+
+                    # Align leg direction with actual travel order in the path.
+                    if path_ids.index(start_id) > path_ids.index(end_id):
+                        start_id, end_id = end_id, start_id
 
                     leg_list.append({
-                        "from_station_id": rel.start_node["station_id"],
-                        "to_station_id": rel.end_node["station_id"],
-                        "type": rel_type,
-                        "line_or_type": line_info,
-                        "travel_time_min": rel["travel_time_min"]
-                    })
+                                "from_station_id": start_id,
+                                "to_station_id":   end_id,
+                                "type":            rel_type,
+                                "line_or_type":    line_info,
+                                "travel_time_min": rel["travel_time_min"]
+                            })
                 
                 response["legs"] = leg_list
 

@@ -56,6 +56,13 @@ DROP TABLE IF EXISTS users                       CASCADE;
 -- 1.1 users
 -- password, secrect_answer 加上經由 argon2id ， hashing 後存於 user_credential
 -- ------------------------------------------------------------
+-- User ID sequence: thread-safe auto-incrementing counter for generating unique user_ids.
+-- NEXTVAL('user_id_seq') is atomic — the database guarantees no two concurrent
+-- registrations ever receive the same number, eliminating race conditions entirely.
+-- Unlike MAX(id)+1 in Python, sequences operate outside transaction boundaries,
+-- so even a rolled-back registration will not reuse its number.
+CREATE SEQUENCE IF NOT EXISTS user_id_seq START 1;
+
 CREATE TABLE users (
     user_id          VARCHAR(20)   PRIMARY KEY,
     full_name        VARCHAR(255)  NOT NULL,

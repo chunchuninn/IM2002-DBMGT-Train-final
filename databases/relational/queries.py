@@ -32,6 +32,9 @@ import psycopg2
 import psycopg2.extras
 
 from skeleton.config import PG_DSN, VECTOR_TOP_K, VECTOR_SIMILARITY_THRESHOLD
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+ph = PasswordHasher()
 
 
 def _connect():
@@ -690,10 +693,6 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
 
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
-
-from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
-ph = PasswordHasher()
 
 def register_user(
     email: str,

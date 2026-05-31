@@ -692,6 +692,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 # ── AUTHENTICATION QUERIES ────────────────────────────────────────────────────
 
 from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 ph = PasswordHasher()
 
 def register_user(
@@ -734,16 +735,11 @@ def register_user(
                     else:
                         return False, "This account has been deactivated. Please contact support."
 
-                # 2. Generate user_id by finding the current maximum and incrementing.
-                #    CAST strips the "RU" prefix so comparison is numerical, not
-                #    lexicographic (avoids "RU19" > "RU100" string-sort bug).
-                cur.execute("""
-                    SELECT user_id FROM users
-                    ORDER BY CAST(SUBSTRING(user_id FROM 3) AS INTEGER) DESC
-                    LIMIT 1
-                """)
-                last = cur.fetchone()
-                new_num = int(last["user_id"][2:]) + 1 if last else 1
+                # 2. Generate a thread-safe user_id using a PostgreSQL sequence.
+                #    NEXTVAL is atomic — the database guarantees no two calls ever return
+                #    the same number, even under high concurrency. No locks, no race conditions.
+                cur.execute("SELECT NEXTVAL('user_id_seq')")
+                new_num = cur.fetchone()["nextval"]
                 user_id = f"RU{new_num:02d}"
 
                 # 3. Insert basic profile into users table
@@ -778,22 +774,104 @@ def login_user(email: str, password: str) -> Optional[dict]:
     Verify credentials. Returns a user dict on success or None on failure.
     Dict keys: user_id, email, full_name, first_name, surname, phone, date_of_birth, is_active.
     """
-    raise NotImplementedError("TODO: implement after designing your schema")
+    with _connect() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
+            # 1. Fetch user and their stored hash in one JOIN query
+            cur.execute("""
+                SELECT u.user_id, u.full_name, u.email, u.phone,
+                       u.date_of_birth, u.is_active,
+                       c.stored_hash
+                FROM users u
+                JOIN user_credential c ON u.user_id = c.user_id
+                WHERE u.email = %s AND u.is_active = TRUE
+            """, (email,))
+            row = cur.fetchone()
+
+            if not row:
+                return None  # Email not found or account deactivated
+
+            # 2. Verify password against stored argon2 hash
+            try:
+                ph.verify(row["stored_hash"], password)
+            except VerifyMismatchError: # Catch specifically the "password mismatch" error
+                return None  # Return None only if we are certain the password is wrong
+
+            # 3. Split full_name into first_name and surname for the return dict
+            parts = row["full_name"].split(" ", 1)
+            first_name = parts[0]
+            surname    = parts[1] if len(parts) > 1 else ""
+
+            return {
+                "user_id":       row["user_id"],
+                "email":         row["email"],
+                "full_name":     row["full_name"],
+                "first_name":    first_name,
+                "surname":       surname,
+                "phone":         row["phone"],
+                "date_of_birth": str(row["date_of_birth"]),
+                "is_active":     row["is_active"],
+            }
 
 def get_user_secret_question(email: str) -> Optional[str]:
     """Return the secret question for a registered email, or None if not found."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT c.secret_question
+                FROM user_credential c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE u.email = %s AND u.is_active = TRUE
+            """, (email,))
+            row = cur.fetchone()
+            return row[0] if row else None
 
 
 def verify_secret_answer(email: str, answer: str) -> bool:
     """Return True if the provided answer matches the stored secret answer (case-insensitive)."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT c.secret_answer_hash
+                FROM user_credential c
+                JOIN users u ON c.user_id = u.user_id
+                WHERE u.email = %s AND u.is_active = TRUE
+            """, (email,))
+            row = cur.fetchone()
+            if not row:
+                return False
+
+            # Verify against lowercased input for case-insensitive comparison
+            try:
+                ph.verify(row[0], answer.strip().lower())
+                return True
+            except VerifyMismatchError: # Catch specifically the "answer mismatch" error
+                return False   # Return False only if we are certain the answer is wrong
 
 
 def update_password(email: str, new_password: str) -> bool:
     """Update the password for a user. Returns True if the row was updated."""
-    raise NotImplementedError("TODO: implement after designing your schema")
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            # 1. Look up user_id from email
+            cur.execute(
+                "SELECT user_id FROM users WHERE email = %s AND is_active = TRUE",
+                (email,)
+            )
+            row = cur.fetchone()
+            if not row:
+                return False
+
+            # 2. Hash new password and update credential table
+            cur.execute("""
+                UPDATE user_credential
+                SET stored_hash = %s,
+                    updated_at  = NOW()
+                WHERE user_id = %s
+            """, (ph.hash(new_password), row[0]))
+
+            # 3. cur.rowcount tells us how many rows were actually updated by THIS cursor
+            return cur.rowcount > 0
 
 
 # ── VECTOR / RAG QUERIES — do not modify ─────────────────────────────────────

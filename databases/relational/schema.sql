@@ -61,7 +61,7 @@ DROP TABLE IF EXISTS users                       CASCADE;
 -- registrations ever receive the same number, eliminating race conditions entirely.
 -- Unlike MAX(id)+1 in Python, sequences operate outside transaction boundaries,
 -- so even a rolled-back registration will not reuse its number.
-CREATE SEQUENCE IF NOT EXISTS user_id_seq START 1;
+CREATE SEQUENCE IF NOT EXISTS user_id_seq START 21;
 
 CREATE TABLE users (
     user_id          VARCHAR(20)   PRIMARY KEY,

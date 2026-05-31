@@ -11,11 +11,11 @@ try:
     from psycopg2.extras import execute_values
     from argon2 import PasswordHasher
 except ImportError as e:
-    print(f"\n缺少必要套件 '{e.name}'")
-    print("系統可能尚未啟動虛擬環境，請依照作業系統執行以下指令：")
+    print(f"\nMissing required package: '{e.name}'")
+    print("The virtual environment may not be activated. Run the appropriate command below:")
     print("[macOS / Linux] source .venv/bin/activate")
     print("[Windows]       .venv\\Scripts\\Activate.ps1")
-    print("若已啟動虛擬環境，請確認是否已安裝相依套件：")
+    print("If the virtual environment is already active, ensure dependencies are installed:")
     print("pip install -r requirements.txt\n")
     sys.exit(1)
 
@@ -93,7 +93,7 @@ def route_booking_id(booking_id, context):
     elif booking_id.startswith('MT'):
         return None, booking_id
     else:
-        raise ValueError(f"{context} 包含無法識別的訂單前綴: {booking_id}")
+        raise ValueError(f"{context} contains unrecognised booking_id prefix: {booking_id}")
 
 
 def seed_metro_stations(cur):
@@ -110,7 +110,7 @@ def seed_metro_stations(cur):
         for row in station_data:
             station_id = row.get('station_id')
             if not station_id:
-                raise ValueError(f"資料異常：缺少必要的 station_id 欄位。原始資料：{row}")
+                raise ValueError(f"Data error: missing required station_id field. Raw data: {row}")
 
             yield (
                 station_id,
@@ -140,7 +140,7 @@ def seed_national_rail_stations(cur):
         for row in station_data:
             station_id = row.get('station_id')
             if not station_id:
-                raise ValueError(f"資料異常：缺少必要的 station_id 欄位。原始資料：{row}")
+                raise ValueError(f"Data error: missing required station_id field. Raw data: {row}")
 
             yield (
                 station_id,
@@ -185,7 +185,7 @@ def seed_metro_schedules(cur):
             dest_id = row.get('destination_station_id')
 
             if not schedule_id or not origin_id or not dest_id:
-                raise ValueError(f"資料異常：缺少必要的排程或車站 ID。原始資料：{row}")
+                raise ValueError(f"Data error: missing required schedule or station ID. Raw data: {row}")
 
             yield (
                 schedule_id,
@@ -215,7 +215,7 @@ def seed_seat_layouts(cur):
         for row in layout_data:
             layout_id = row.get('layout_id')
             if not layout_id:
-                raise ValueError(f"資料異常：缺少必要的 layout_id 欄位。原始資料：{row}")
+                raise ValueError(f"Data error: missing required layout_id field. Raw data: {row}")
 
             yield (
                 layout_id,
@@ -238,7 +238,7 @@ def seed_national_rail_schedules(cur):
             if sl.get("schedule_id") and sl.get("layout_id")
         }
     except Exception as e:
-        print(f"  [WARN] 無法載入 seat_layouts 建立對照表，將全數使用預設版型。原因: {e}")
+        print(f"  [WARN] Could not load seat_layouts for lookup table; all schedules will use the default layout. Reason: {e}")
 
     DEFAULT_LAYOUT_ID = "SL01"
 
@@ -258,7 +258,7 @@ def seed_national_rail_schedules(cur):
             dest_id = row.get('destination_station_id')
 
             if not schedule_id or not origin_id or not dest_id:
-                raise ValueError(f"資料異常：缺少必要的排程或車站 ID。原始資料：{row}")
+                raise ValueError(f"Data error: missing required schedule or station ID. Raw data: {row}")
 
             yield (
                 schedule_id,
@@ -293,7 +293,7 @@ def seed_users(cur):
             full_name = row.get('full_name')
 
             if not user_id or not email or not full_name:
-                raise ValueError(f"資料異常：缺少 user_id, full_name 或 email。原始資料：{row}")
+                raise ValueError(f"Data error: missing user_id, full_name, or email. Raw data: {row}")
 
             yield (
                 user_id,
@@ -353,7 +353,7 @@ def seed_national_rail_bookings(cur):
             dest_id = row.get('destination_station_id')
 
             if not all([booking_id, user_id, schedule_id, origin_id, dest_id]):
-                raise ValueError(f"交易資料異常：缺少核心訂單或關聯 ID。原始資料：{row}")
+                raise ValueError(f"Data error: missing core booking or foreign key ID. Raw data: {row}")
 
             yield (
                 booking_id,
@@ -397,7 +397,7 @@ def seed_metro_travels(cur):
             dest_id = row.get('destination_station_id')
 
             if not all([trip_id, user_id, schedule_id, origin_id, dest_id]):
-                raise ValueError(f"捷運搭乘紀錄異常：缺少核心主鍵或外鍵 ID。原始資料：{row}")
+                raise ValueError(f"Data error: missing primary key or foreign key ID in metro travel record. Raw data: {row}")
 
             yield (
                 trip_id,
@@ -432,7 +432,7 @@ def seed_payments(cur):
             booking_id = row.get('booking_id')
 
             if not payment_id or not booking_id:
-                raise ValueError(f"付款資料異常：缺少 payment_id 或對應的 booking_id。原始資料：{row}")
+                raise ValueError(f"Data error: missing payment_id or corresponding booking_id. Raw data: {row}")
 
             nr_id, mt_id = route_booking_id(booking_id, 'Payments')
 
@@ -464,7 +464,7 @@ def seed_feedback(cur):
             booking_id = row.get('booking_id')
 
             if not feedback_id or not user_id or not booking_id:
-                raise ValueError(f"評價資料異常：缺少 feedback_id, user_id 或 booking_id。原始資料：{row}")
+                raise ValueError(f"Data error: missing feedback_id, user_id, or booking_id. Raw data: {row}")
 
             nr_id, mt_id = route_booking_id(booking_id, 'Feedback')
 

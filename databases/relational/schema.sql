@@ -31,8 +31,8 @@
 
 -- ============================================================
 -- SECTION 0 — DROP ALL TABLES
--- 依賴方（Batch C）優先 DROP，被依賴方（Batch A）最後 DROP
--- CASCADE 確保跨表的 FK 約束一併清除
+-- Dependent entities (Batch C) are dropped first, dependencies (Batch A) are dropped last.
+-- CASCADE ensures that cross-table FK constraints are cleared together.
 -- ============================================================
 
 DROP TABLE IF EXISTS feedback                    CASCADE;
@@ -54,7 +54,7 @@ DROP TABLE IF EXISTS users                       CASCADE;
 
 -- ------------------------------------------------------------
 -- 1.1 users
--- password, secrect_answer 加上經由 argon2id ， hashing 後存於 user_credential
+-- password, secret_answer hashed via argon2id, stored in user_credential
 -- ------------------------------------------------------------
 -- User ID sequence: thread-safe auto-incrementing counter for generating unique user_ids.
 -- NEXTVAL('user_id_seq') is atomic — the database guarantees no two concurrent
@@ -75,7 +75,7 @@ CREATE TABLE users (
 
 CREATE TABLE user_credential (
     user_id              VARCHAR(20)   PRIMARY KEY,
-    stored_hash          VARCHAR(255)  NOT NULL,        -- 儲存完整的 argon2id 雜湊編碼字串
+    stored_hash          VARCHAR(255)  NOT NULL,        -- Store the complete argon2id hash string
     secret_question      TEXT          NOT NULL,
     secret_answer_hash   VARCHAR(255)  NOT NULL,
     updated_at           TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
@@ -83,15 +83,15 @@ CREATE TABLE user_credential (
     CONSTRAINT fk_credential_user
         FOREIGN KEY (user_id)
         REFERENCES users (user_id)
-        ON DELETE CASCADE ON UPDATE CASCADE          -- 使用者刪除時，憑證自動連帶刪除
+        ON DELETE CASCADE ON UPDATE CASCADE          -- Automatically delete credentials when user is deleted
 );
 
 
 -- ------------------------------------------------------------
 -- 1.2 metro_stations
--- 與 national_rail_stations 存在循環外鍵
--- adjacent_stations 在 Neo4j 中會被轉換為節點之間的邊
--- interchange_national_rail_station_id 的 FK 於兩表建立後補加
+-- Circular foreign key with national_rail_stations
+-- adjacent_stations will be converted to edges between nodes in Neo4j
+-- The FK for interchange_national_rail_station_id is added after both tables are created
 -- ------------------------------------------------------------
 CREATE TABLE metro_stations (
     station_id                           VARCHAR(20)   PRIMARY KEY,
@@ -100,10 +100,10 @@ CREATE TABLE metro_stations (
     is_interchange_metro                 BOOLEAN       NOT NULL DEFAULT FALSE,
     interchange_metro_lines              TEXT[]        NOT NULL DEFAULT '{}',
     is_interchange_national_rail         BOOLEAN       NOT NULL DEFAULT FALSE,
-    interchange_national_rail_station_id VARCHAR(20),                            -- FK 見下方 ALTER TABLE
-    adjacent_stations                    JSONB         NOT NULL DEFAULT '[]',   -- 將相鄰站點資訊以 JSONB 儲存，用以備份
+    interchange_national_rail_station_id VARCHAR(20),                            -- FK see ALTER TABLE below
+    adjacent_stations                    JSONB         NOT NULL DEFAULT '[]',   -- Store adjacent stations info as JSONB for backup
     
-    -- 只要 interchange_national_rail_station_id 不是 NULL，is_interchange_national_rail 就應該是 TRUE
+    -- As long as interchange_national_rail_station_id is not NULL, is_interchange_national_rail should be TRUE
     CONSTRAINT chk_ms_interchange_consistency CHECK (
         (is_interchange_national_rail = TRUE AND interchange_national_rail_station_id IS NOT NULL) OR
         (is_interchange_national_rail = FALSE AND interchange_national_rail_station_id IS NULL)
@@ -132,10 +132,10 @@ CREATE TABLE national_rail_stations (
 
 
 -- ------------------------------------------------------------
--- 1.4 跨網路循環外鍵
--- ON DELETE SET NULL：轉乘站被刪除時，欄位設為 NULL 而非報錯，
---                    保留車站紀錄，避免連帶刪除整個車站資料。
--- ON UPDATE CASCADE：主鍵更新時自動同步子表。
+-- 1.4 Cross-network circular foreign keys
+-- ON DELETE SET NULL: When an interchange station is deleted, set the field to NULL instead of throwing an error,
+--                    retaining station records and avoiding cascading deletion of the entire station data.
+-- ON UPDATE CASCADE: Automatically sync child tables when the primary key is updated.
 -- ------------------------------------------------------------
 ALTER TABLE metro_stations
     ADD CONSTRAINT fk_metro_interchange_national_rail
@@ -187,14 +187,14 @@ CREATE TABLE metro_schedules (
 
 -- ------------------------------------------------------------
 -- 2.2 national_rail_seat_layouts
--- coaches 為深層巢狀陣列（車廂 → 座位清單），使用 JSONB。
--- schedule_id UNIQUE：強制一個班次只能對應一套座位佈局。
--- ON DELETE CASCADE：班次撤銷時，對應佈局同步刪除。
+-- coaches is a deep nested array (coach -> seat list), using JSONB.
+-- schedule_id UNIQUE: Forces a schedule to correspond to only one seat layout.
+-- ON DELETE CASCADE: When a schedule is cancelled, the corresponding layout is deleted synchronously.
 -- ------------------------------------------------------------
 CREATE TABLE national_rail_seat_layouts (
     layout_id    VARCHAR(20)  PRIMARY KEY,
 
-    -- 移除 schedule_id，避免產生產生循環依賴
+    -- Removed schedule_id to avoid creating circular dependencies
     layout_name  VARCHAR(100) NOT NULL DEFAULT 'Standard Template',
     coaches      JSONB        NOT NULL,
 
@@ -215,7 +215,7 @@ CREATE TABLE national_rail_schedules (
     destination_station_id       VARCHAR(20)     NOT NULL,
     stops_in_order               JSONB           NOT NULL,   
     
-    -- 特快車跳過的車站紀錄，且不允許為 NULL，設預設空陣列 
+    -- Record of skipped stations for express trains, must not be NULL, default empty array 
     skip_stations                JSONB           NOT NULL DEFAULT '[]',
 
     travel_time_from_origin_min  JSONB           NOT NULL,
@@ -225,22 +225,22 @@ CREATE TABLE national_rail_schedules (
     frequency_min                SMALLINT        NOT NULL CHECK (frequency_min > 0),
     operates_on                  TEXT[]          NOT NULL DEFAULT '{}',
 
-    -- 由班表引進外鍵指向 national_rail_seat_layouts ，使用 1:N 的共享車型架構
+    -- Foreign key from schedule pointing to national_rail_seat_layouts, using 1:N shared train model architecture
     layout_id                    VARCHAR(20)     NOT NULL,
 
-    -- 起點站外鍵：限制必須存在於車站主檔，且營運中車站拒絕被輕易刪除 (RESTRICT)
+    -- Origin station foreign key: Requires existence in station master table, operating stations cannot be easily deleted (RESTRICT)
     CONSTRAINT fk_nr_sch_origin
         FOREIGN KEY (origin_station_id)
         REFERENCES national_rail_stations (station_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 終點站外鍵
+    -- Destination station foreign key
     CONSTRAINT fk_nr_sch_destination
         FOREIGN KEY (destination_station_id)
         REFERENCES national_rail_stations (station_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 座位佈局樣板外鍵：只要該座位車型仍有班次在使用，即拒絕刪除該樣板
+    -- Seat layout template foreign key: Refuses deletion of the template as long as schedules still use this seat model
     CONSTRAINT fk_nr_sch_layout
         FOREIGN KEY (layout_id)
         REFERENCES national_rail_seat_layouts (layout_id)
@@ -271,7 +271,7 @@ CREATE TABLE national_rail_bookings (
     amount_usd              NUMERIC(10,2)   NOT NULL CHECK (amount_usd >= 0),
     status                  VARCHAR(20)     NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
     booked_at               TIMESTAMPTZ     NOT NULL DEFAULT NOW(),
-    travelled_at            TIMESTAMPTZ,    -- 搭乘前為 NULL
+    travelled_at            TIMESTAMPTZ,    -- NULL before travel
 
     CONSTRAINT fk_nr_booking_user
         FOREIGN KEY (user_id)
@@ -294,7 +294,7 @@ CREATE TABLE national_rail_bookings (
         ON DELETE RESTRICT ON UPDATE CASCADE
 );
 
-    --使用 WHERE 條件排除了 'cancelled' 的訂單，若有人退票，該座位就能立刻被其他人重新買走
+    -- Using WHERE condition to exclude 'cancelled' orders, so if someone refunds, the seat can be re-purchased immediately
 CREATE UNIQUE INDEX idx_prevent_double_booking 
 ON national_rail_bookings (schedule_id, travel_date, coach, seat_id)
 WHERE status IN ('confirmed', 'completed') AND coach IS NOT NULL AND seat_id IS NOT NULL;
@@ -302,8 +302,8 @@ WHERE status IN ('confirmed', 'completed') AND coach IS NOT NULL AND seat_id IS 
 
 -- ------------------------------------------------------------
 -- 3.2 metro_travels
--- 無 departure_time / coach / seat_id / fare_class：
--- 捷運不預約座位，採統一計費制。
+-- No departure_time / coach / seat_id / fare_class:
+-- Metro does not reserve seats, uses a flat fare system.
 -- ------------------------------------------------------------
 CREATE TABLE metro_travels (
     trip_id                 VARCHAR(20)     PRIMARY KEY,
@@ -314,15 +314,15 @@ CREATE TABLE metro_travels (
     travel_date             DATE            NOT NULL,
     ticket_type             VARCHAR(30)     NOT NULL CHECK (ticket_type IN ('single', 'day_pass')),
 
-    -- 一日票的參照欄位
+    -- Reference field for day pass
     day_pass_ref            VARCHAR(20),
 
-    -- NULL 僅允許於 day_pass 使用紀錄情境（見 chk_metro_ticket_logic 情境 B/C）
+    -- NULL only allowed in day_pass usage record scenarios (see chk_metro_ticket_logic scenarios B/C)
     stops_travelled         SMALLINT        CHECK (stops_travelled > 0),
     amount_usd              NUMERIC(10,2)   NOT NULL CHECK (amount_usd >= 0),
     status                  VARCHAR(20)     NOT NULL CHECK (status IN ('confirmed', 'completed', 'cancelled')),
 
-    -- NULL 僅允許於 day_pass 使用紀錄（情境 C），其餘情境由 chk_metro_ticket_logic 強制非 NULL
+    -- NULL only allowed in day_pass usage record (scenario C), other scenarios forced non-NULL by chk_metro_ticket_logic
     purchased_at            TIMESTAMPTZ,
     travelled_at            TIMESTAMPTZ,
 
@@ -346,22 +346,22 @@ CREATE TABLE metro_travels (
         REFERENCES metro_stations (station_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 【自我參照外鍵】
-    -- 確保 day_pass_ref 填入的 ID 必須是此表中真實存在的一筆交易
+    -- [Self-referencing foreign key]
+    -- Ensure the ID filled in day_pass_ref must be a genuinely existing transaction in this table
     CONSTRAINT fk_metro_day_pass_ref
         FOREIGN KEY (day_pass_ref)
         REFERENCES metro_travels (trip_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 嚴格規範不同票種與狀態下，欄位是該為 NULL 還是必須有值
+    -- Strictly specify whether fields should be NULL or must have values under different ticket types and statuses
     CONSTRAINT chk_metro_ticket_logic CHECK (
-        -- 情境 A：單程票 (必須有站數、購買時間，且無 day_pass_ref)
+        -- Scenario A: Single ticket (must have stops travelled, purchase time, and no day_pass_ref)
         (ticket_type = 'single' AND day_pass_ref IS NULL AND stops_travelled IS NOT NULL AND purchased_at IS NOT NULL) 
         OR
-        -- 情境 B：購買一日票當下 (無站數、無 day_pass_ref、必須有購買時間)
+        -- Scenario B: Point of purchasing day pass (no stops travelled, no day_pass_ref, must have purchase time)
         (ticket_type = 'day_pass' AND day_pass_ref IS NULL AND stops_travelled IS NULL AND purchased_at IS NOT NULL) 
         OR 
-        -- 情境 C：使用一日票搭乘 (必須有 day_pass_ref、金額必須是 0、無須再次紀錄購買時間)
+        -- Scenario C: Travelling using day pass (must have day_pass_ref, amount must be 0, no need to record purchase time again)
         (ticket_type = 'day_pass' AND day_pass_ref IS NOT NULL AND amount_usd = 0 AND purchased_at IS NULL)
     )
 );
@@ -389,13 +389,13 @@ CREATE TABLE payments (
         REFERENCES metro_travels (trip_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 確保這筆金流剛好只對應一種交通服務，不能兩個都有值，也不能兩個都是 NULL
+    -- Ensure this payment exactly corresponds to only one transportation service, cannot both have values, nor both be NULL
     CONSTRAINT chk_payment_exclusive_arc CHECK (
         (national_rail_booking_id IS NOT NULL AND metro_travel_id IS NULL) OR
         (national_rail_booking_id IS NULL AND metro_travel_id IS NOT NULL)
     ),
 
-    -- 如果狀態是 paid 或 refunded，就必須有時間戳記
+    -- If status is paid or refunded, there must be a timestamp
     CONSTRAINT chk_payment_status_time CHECK (
         (status IN ('paid', 'refunded') AND paid_at IS NOT NULL) OR
         (status IN ('pending', 'failed') AND paid_at IS NULL)
@@ -409,7 +409,7 @@ CREATE TABLE payments (
 CREATE TABLE feedback (
     feedback_id   VARCHAR(20)     PRIMARY KEY,
 
-    -- 將原本無法受保護的單一 booking_id，拆分為兩個獨立的外鍵欄位
+    -- Split the originally unprotected single booking_id into two independent foreign key fields
     national_rail_booking_id VARCHAR(20),
     metro_travel_id          VARCHAR(20),
     
@@ -433,7 +433,7 @@ CREATE TABLE feedback (
         REFERENCES metro_travels (trip_id)
         ON DELETE RESTRICT ON UPDATE CASCADE,
 
-    -- 確保這筆評價剛好只對應「一種」交通服務的訂單
+    -- Ensure this feedback exactly corresponds to an order of "one" transportation service
     CONSTRAINT chk_feedback_exclusive_arc CHECK (
         (national_rail_booking_id IS NOT NULL AND metro_travel_id IS NULL) OR
         (national_rail_booking_id IS NULL AND metro_travel_id IS NOT NULL)
@@ -470,4 +470,4 @@ CREATE TABLE IF NOT EXISTS policy_documents (
 );
 
 -- Index for fast cosine similarity search
-CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding ON policy_documents USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX IF NOT EXISTS idx_policy_documents_embedding ON policy_documents USING hnsw (embedding vector_cosine_ops);git branch -D feature/queries.py'

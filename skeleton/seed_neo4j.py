@@ -228,8 +228,8 @@ def _seed_from_json(session):
                 """
                 MATCH (m:MetroStation {station_id: $metro_id})
                 MATCH (r:NationalRailStation {station_id: $rail_id})
-                MERGE (m)-[:TRANSFER_TO {walk_time_min: 5}]->(r)
-                MERGE (r)-[:TRANSFER_TO {walk_time_min: 5}]->(m)
+                MERGE (m)-[:TRANSFER_TO {travel_time_min: 5}]->(r)
+                MERGE (r)-[:TRANSFER_TO {travel_time_min: 5}]->(m)
                 """,
                 metro_id=s["station_id"],
                 rail_id=s["interchange_national_rail_station_id"],

@@ -4,7 +4,7 @@
 // If you prefer Cypher-file seeding, implement your graph schema here.
 // Run with: python skeleton/seed_neo4j.py (or via the Neo4j Browser)
 
-// 1. 建立唯一約束，防止資料重覆亂掉
+// 1. Create unique constraints to prevent duplicate data.
 CREATE CONSTRAINT FOR (s:MetroStation) REQUIRE s.station_id IS UNIQUE;
 CREATE CONSTRAINT FOR (s:NationalRailStation) REQUIRE s.station_id IS UNIQUE;
 
@@ -47,7 +47,7 @@ MERGE (:NationalRailStation {station_id: "NR09", name: "Dunmore",            lin
 MERGE (:NationalRailStation {station_id: "NR10", name: "Langford End",       lines: ["NR2"]});
 
 // =================================================================
-// 4. 建立捷運雙向連線 (METRO_LINK)
+// 4. Create bidirectional metro connections (METRO_LINK).
 // =================================================================
 UNWIND [
   // --- M1 green line ---
@@ -86,7 +86,7 @@ MERGE (a)-[:METRO_LINK {line: link.line, color: link.color, travel_time_min: lin
 MERGE (b)-[:METRO_LINK {line: link.line, color: link.color, travel_time_min: link.time}]->(a);
 
 // =================================================================
-// 5. 建立國鐵雙向連線 (RAIL_LINK)
+// 5. Create bidirectional rail connections (RAIL_LINK).
 // =================================================================
 UNWIND [
   // --- NR1 purple line ---
@@ -109,15 +109,16 @@ MERGE (a)-[:RAIL_LINK {line: link.line, color: link.color, travel_time_min: link
 MERGE (b)-[:RAIL_LINK {line: link.line, color: link.color, travel_time_min: link.time}]->(a);
 
 // =================================================================
-// 6.建立捷運與國鐵之間的跨系統轉乘通道
+// 6.Create inter-system transfer links between metro and national rail stations.
 // =================================================================
 UNWIND [
-  {metro_id: "MS01", rail_id: "NR01", type: "Walkway", time: 5}, // Central 轉乘
-  {metro_id: "MS07", rail_id: "NR03", type: "Walkway", time: 4}, // Old Town 轉乘
-  {metro_id: "MS15", rail_id: "NR07", type: "Walkway", time: 3}  // Ferndale 轉乘
+  {metro_id: "MS01", rail_id: "NR01", type: "Walkway", time: 5}, // Central transfer
+  {metro_id: "MS07", rail_id: "NR03", type: "Walkway", time: 4}, // Old Town transfer
+  {metro_id: "MS15", rail_id: "NR07", type: "Walkway", time: 3}  // Ferndale transfer
 ] AS transfer
 
 MATCH (m:MetroStation {station_id: transfer.metro_id})
 MATCH (r:NationalRailStation {station_id: transfer.rail_id})
-MERGE (m)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(r)
-MERGE (r)-[:TRANSFER_TO {type: transfer.type, walk_time_min: transfer.time}]->(m);
+
+MERGE (m)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(r)
+MERGE (r)-[:TRANSFER_TO {type: transfer.type, travel_time_min: transfer.time}]->(m);

@@ -323,7 +323,7 @@ def seed_users(cur):
                 user_id,
                 ph.hash(raw_password),
                 secret_question,
-                ph.hash(raw_answer)
+                ph.hash(raw_answer.strip().lower())# Normalise the answer to lowercase before hashing so that verification, the same hash and will all pass verification.
             )
 
     c_sql = build_upsert_sql('user_credential', c_cols, 'user_id') + ', updated_at = NOW()'

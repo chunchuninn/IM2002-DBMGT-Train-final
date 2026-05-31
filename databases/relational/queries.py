@@ -99,7 +99,7 @@ def query_national_rail_availability(
             s.operates_on,
             orig.name  AS origin_name,
             dest.name  AS destination_name,
-            -- 計算 origin → destination 之間的停靠站數
+            -- Calculate number of stops between origin and destination
             (
                 SELECT idx_dest.ord - idx_orig.ord
                 FROM
@@ -111,7 +111,7 @@ def query_national_rail_availability(
                 WHERE idx_orig.station = %(origin_id)s
                   AND idx_dest.station = %(destination_id)s
             ) AS stops_travelled,
-            -- 當天已售座位數（只在提供 travel_date 時有意義）
+            -- Count seats already booked on the requested travel date
             COALESCE((
                 SELECT COUNT(*)
                 FROM national_rail_bookings b
@@ -123,11 +123,11 @@ def query_national_rail_availability(
         JOIN national_rail_stations orig ON orig.station_id = s.origin_station_id
         JOIN national_rail_stations dest ON dest.station_id = s.destination_station_id
         WHERE
-            -- origin 在 stops_in_order 裡
+            -- origin must appear in stops_in_order
             s.stops_in_order @> %(origin_json)s::jsonb
-            -- destination 在 stops_in_order 裡
+            -- destination must appear in stops_in_order
             AND s.stops_in_order @> %(destination_json)s::jsonb
-            -- origin 的 index 必須在 destination 之前
+            -- origin index must come before destination index
             AND (
                 SELECT ord FROM jsonb_array_elements_text(s.stops_in_order)
                     WITH ORDINALITY AS t(station, ord)
@@ -162,7 +162,7 @@ def query_national_rail_fare(
 ) -> Optional[dict]:
     """
     Calculate the fare for a national rail journey.
-    fare_classes JSONB 格式: {"standard": {"base_fare_usd": 2.5, "per_stop_rate_usd": 1.5}, ...}
+    fare_classes JSONB format: {"standard": {"base_fare_usd": 2.5, "per_stop_rate_usd": 1.5}, ...}
     """
     sql = """
         SELECT
@@ -286,18 +286,18 @@ def query_available_seats(
 ) -> list[dict]:
     """
     Return available seats for a national rail journey on a given date.
-    從 seat_layouts JSONB 展開所有座位，再排除已被訂走的座位。
+    Expands all seats from the seat_layouts JSONB and excludes already-booked seats.
     """
     sql = """
         WITH layout AS (
-            -- 找到這個班次對應的座位樣板
+            -- Retrieve the seat layout template for this schedule
             SELECT l.coaches
             FROM national_rail_schedules s
             JOIN national_rail_seat_layouts l ON l.layout_id = s.layout_id
             WHERE s.schedule_id = %(schedule_id)s
         ),
         all_seats AS (
-            -- 展開 coaches JSONB：coaches → 每個 coach → seats 陣列
+            -- Expand coaches JSONB: coaches → each coach → seats array
             SELECT
                 coach_obj ->> 'coach'      AS coach,
                 coach_obj ->> 'fare_class' AS fare_class,
@@ -309,7 +309,7 @@ def query_available_seats(
                  jsonb_array_elements(coach_obj -> 'seats') AS seat
         ),
         booked_seats AS (
-            -- 當天已被訂走（confirmed 或 completed）的座位
+            -- Seats already booked on this date (confirmed or completed)
             SELECT coach, seat_id
             FROM national_rail_bookings
             WHERE schedule_id = %(schedule_id)s
@@ -327,7 +327,7 @@ def query_available_seats(
         LEFT JOIN booked_seats b
                ON b.coach = a.coach AND b.seat_id = a.seat_id
         WHERE a.fare_class = %(fare_class)s
-          AND b.seat_id IS NULL          -- 沒被訂走的才是可用座位
+          AND b.seat_id IS NULL          -- only seats not yet booked are available
         ORDER BY a.coach, a.row, a.col
     """
     with _connect() as conn:
@@ -482,7 +482,7 @@ def execute_booking(
         with conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
-                # 1. 找到班次資訊（stops_in_order、departure_time、fare_classes）
+                # 1. Fetch schedule info (stops_in_order, departure_time, fare_classes)
                 cur.execute("""
                     SELECT stops_in_order, first_train_time, fare_classes
                     FROM national_rail_schedules
@@ -492,7 +492,7 @@ def execute_booking(
                 if not sched:
                     return False, f"Schedule {schedule_id} not found."
 
-                # 2. 計算 stops_travelled
+                # 2. Calculate stops_travelled
                 stops = sched["stops_in_order"]
                 try:
                     orig_idx = stops.index(origin_station_id)
@@ -503,7 +503,7 @@ def execute_booking(
                     return False, "Origin must come before destination on this schedule."
                 stops_travelled = dest_idx - orig_idx
 
-                # 3. 計算票價
+                # 3. Calculate fare
                 fc = sched["fare_classes"].get(fare_class)
                 if not fc:
                     return False, f"Fare class '{fare_class}' not available on this schedule."
@@ -512,11 +512,11 @@ def execute_booking(
                     2
                 )
 
-                # 4. 處理座位：auto-assign 或指定座位
+                # 4. Handle seat selection: auto-assign or specific seat
                 coach_val = None
                 seat_val  = None
                 if seat_id and seat_id.lower() != "any":
-                    # 確認座位未被佔用
+                    # Verify the seat is not already booked
                     cur.execute("""
                         SELECT 1 FROM national_rail_bookings
                         WHERE schedule_id = %s
@@ -526,7 +526,7 @@ def execute_booking(
                     """, (schedule_id, travel_date, seat_id))
                     if cur.fetchone():
                         return False, f"Seat {seat_id} is already booked."
-                    # 從 layout 找 coach
+                    # Look up coach from seat layout
                     cur.execute("""
                         SELECT coach_obj ->> 'coach' AS coach
                         FROM national_rail_schedules s
@@ -543,7 +543,7 @@ def execute_booking(
                     coach_val = coach_row["coach"]
                     seat_val  = seat_id
                 else:
-                    # auto-assign：找第一個可用座位
+                    # auto-assign: find the first available seat
                     available = query_available_seats(schedule_id, travel_date, fare_class)
                     if not available:
                         return False, "No available seats for this journey."
@@ -551,7 +551,7 @@ def execute_booking(
                     coach_val = chosen["coach"]
                     seat_val  = chosen["seat_id"]
 
-                # 5. 產生 booking_id 並插入
+                # 5. Generate booking_id and insert
                 booking_id = _gen_booking_id()
                 cur.execute("""
                     INSERT INTO national_rail_bookings (
@@ -574,7 +574,7 @@ def execute_booking(
                     stops_travelled, amount_usd,
                 ))
 
-                # 6. 建立 payment 記錄
+                # 6. Create payment record
                 payment_id = _gen_payment_id()
                 cur.execute("""
                     INSERT INTO payments (
@@ -616,7 +616,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
         with conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
 
-                # 1. 找到訂單
+                # 1. Fetch the booking
                 cur.execute("""
                     SELECT b.booking_id, b.user_id, b.travel_date, b.departure_time,
                            b.amount_usd, b.status, s.service_type
@@ -634,7 +634,7 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
                 if booking["status"] == "completed":
                     return False, "Cannot cancel a completed journey."
 
-                # 2. 計算退款比例
+                # 2. Calculate refund percentage
                 departure_dt = datetime.combine(
                     booking["travel_date"], booking["departure_time"]
                 ).replace(tzinfo=timezone.utc)
@@ -661,14 +661,14 @@ def execute_cancellation(booking_id: str, user_id: str) -> tuple[bool, dict | st
 
                 refund_amount = round(float(booking["amount_usd"]) * pct, 2)
 
-                # 3. 更新訂單狀態
+                # 3. Update booking status to cancelled
                 cur.execute("""
                     UPDATE national_rail_bookings
                     SET status = 'cancelled'
                     WHERE booking_id = %s
                 """, (booking_id,))
 
-                # 4. 更新 payment 為 refunded（若有退款）
+                # 4. Update payment to refunded (if applicable)
                 if pct > 0:
                     cur.execute("""
                         UPDATE payments

@@ -42,10 +42,10 @@ def _parse_cypher(path: str) -> list[str]:
     with open(path, encoding="utf-8") as f:
         raw = f.read()
 
-    # 正規化換行符（Windows CRLF → LF）
+    # Normalise line endings (Windows CRLF → LF)
     raw = raw.replace("\r\n", "\n")
 
-    # 移除 // 注釋行
+    # Strip // comment lines
     lines = []
     for line in raw.splitlines():
         if line.strip().startswith("//"):
@@ -54,17 +54,17 @@ def _parse_cypher(path: str) -> list[str]:
 
     text = "\n".join(lines)
 
-    # 以分號切割（每個完整語句結尾都有分號）
-    # 但 UNWIND 區塊內的 MERGE 不含分號，整塊到結尾的 ; 才結束
-    # split(";") 就能正確把每個獨立語句切開
+    # Split on semicolons — each complete statement ends with ';'.
+    # MERGE statements inside UNWIND blocks have no internal semicolons,
+    # so split(";") correctly separates each independent statement.
     raw_parts = text.split(";")
     statements = []
     for part in raw_parts:
         s = part.strip()
-        # 過濾掉空白與純注釋殘留
+        # Skip empty parts and comment-only fragments
         if not s:
             continue
-        # 過濾掉只剩注釋的片段
+        # Filter out fragments that contain only comments
         non_comment = "\n".join(
             l for l in s.splitlines() if not l.strip().startswith("//")
         ).strip()
@@ -81,18 +81,18 @@ def seed():
 
     with driver.session() as session:
 
-        # Step 1: 清空現有圖資料
+        # Step 1: Clear all existing graph data
         session.run("MATCH (n) DETACH DELETE n")
-        print("  [OK] Cleared existing graph data  清空舊圖資料")
+        print("  [OK] Cleared existing graph data")
 
-        # 清除舊的 constraints（重跑時避免衝突）
+        # Drop existing constraints to avoid conflicts on re-run
         existing = session.run("SHOW CONSTRAINTS YIELD name").data()
         for row in existing:
             session.run(f"DROP CONSTRAINT {row['name']}")
         if existing:
-            print(f"  [OK] Dropped {len(existing)} existing constraint(s)  清除舊約束")
+            print(f"  [OK] Dropped {len(existing)} existing constraint(s)")
 
-        # Step 2: 讀取並執行 seed.cypher
+        # Step 2: Read and execute seed.cypher
         if not os.path.exists(_CYPHER_FILE):
             print(f"  [WARN] seed.cypher not found at {_CYPHER_FILE}")
             print("         Falling back to JSON-driven seeding...")
@@ -102,7 +102,7 @@ def seed():
 
         statements = _parse_cypher(_CYPHER_FILE)
 
-        # 過濾掉純 "Deprecated" 說明行（舊版 seed.cypher 只有注釋）
+        # Filter out deprecated comment-only statements (legacy seed.cypher had only comments)
         real_statements = [s for s in statements if not s.startswith("//")]
 
         if not real_statements:
@@ -132,7 +132,7 @@ def seed():
             counters["nodes"] += nodes_created
             counters["rels"]  += rels_created
 
-            # 只在有實際效果時印出
+            # Only print lines that produced a visible effect
             if nodes_created or rels_created or c.constraints_added:
                 label = stmt.strip()[:60].replace("\n", " ")
                 print(f"    [{i:02d}] nodes+{nodes_created:3d}  rels+{rels_created:3d}  │ {label}…")
@@ -143,11 +143,11 @@ def seed():
         print(f"    Relationships created: {counters['rels']}")
 
     driver.close()
-    print("\n[OK] Neo4j graph seeded successfully.  圖資料庫建立完成")
+    print("\n[OK] Neo4j graph seeded successfully.")
     print("     Open http://localhost:7475 to explore the graph.")
 
 
-# ── JSON fallback（seed.cypher 是空白時使用）─────────────────────────────────
+# ── JSON fallback (used when seed.cypher is empty or missing) ───────────────
 
 def _seed_from_json(session):
     """
@@ -158,7 +158,7 @@ def _seed_from_json(session):
     metro_stations = _load("metro_stations.json")
     rail_stations  = _load("national_rail_stations.json")
 
-    # --- MetroStation nodes ---
+    # --- Create MetroStation nodes ---
     for s in metro_stations:
         session.run(
             """
@@ -170,7 +170,7 @@ def _seed_from_json(session):
         )
     print(f"  [OK] MetroStation nodes: {len(metro_stations)}")
 
-    # --- NationalRailStation nodes ---
+    # --- Create NationalRailStation nodes ---
     for s in rail_stations:
         session.run(
             """
@@ -182,7 +182,7 @@ def _seed_from_json(session):
         )
     print(f"  [OK] NationalRailStation nodes: {len(rail_stations)}")
 
-    # --- METRO_LINK relationships (from adjacent_stations) ---
+    # --- Create METRO_LINK relationships (from adjacent_stations) ---
     ml_count = 0
     for s in metro_stations:
         for adj in s.get("adjacent_stations", []):
@@ -201,7 +201,7 @@ def _seed_from_json(session):
             ml_count += 1
     print(f"  [OK] METRO_LINK relationships: {ml_count}")
 
-    # --- RAIL_LINK relationships ---
+    # --- Create RAIL_LINK relationships ---
     rl_count = 0
     for s in rail_stations:
         for adj in s.get("adjacent_stations", []):
@@ -220,7 +220,7 @@ def _seed_from_json(session):
             rl_count += 1
     print(f"  [OK] RAIL_LINK relationships: {rl_count}")
 
-    # --- TRANSFER_TO relationships (metro ↔ rail interchange) ---
+    # --- Create TRANSFER_TO relationships (metro ↔ rail interchange) ---
     tx_count = 0
     for s in metro_stations:
         if s.get("is_interchange_national_rail") and s.get("interchange_national_rail_station_id"):
@@ -241,5 +241,5 @@ def _seed_from_json(session):
 # ── entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("Connecting to Neo4j...  連線中")
+    print("Connecting to Neo4j...")
     seed()

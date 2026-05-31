@@ -844,8 +844,9 @@ def verify_secret_answer(email: str, answer: str) -> bool:
             try:
                 ph.verify(row[0], answer.strip().lower())
                 return True
-            except VerifyMismatchError: # Catch specifically the "answer mismatch" error
-                return False   # Return False only if we are certain the answer is wrong
+            except Exception as e:
+                print(f"[DEBUG verify_secret_answer] error: {e}")
+                return False
 
 
 def update_password(email: str, new_password: str) -> bool:

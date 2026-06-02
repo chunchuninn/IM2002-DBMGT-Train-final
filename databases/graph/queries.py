@@ -231,20 +231,30 @@ def query_cheapest_route(
                 metro_stops = 0
                 rail_stops = 0
 
+                # Build path_ids once before the loop for direction correction
+                path_ids = [s["station_id"] for s in station_list]
+
                 for rel in neo4j_path.relationships:
                     rel_type = rel.type
                     line_info = rel.get("line") if rel.get("line") else rel.get("type", "Unknown")
-                    
+
                     if rel_type == "METRO_LINK":
                         metro_stops += 1
                     elif rel_type == "RAIL_LINK":
                         rail_stops += 1
 
+                    start_id = rel.start_node["station_id"]
+                    end_id   = rel.end_node["station_id"]
+
+                    # Align leg direction with actual travel order in the path
+                    if path_ids.index(start_id) > path_ids.index(end_id):
+                        start_id, end_id = end_id, start_id
+
                     leg_list.append({
-                        "from_station_id": rel.start_node["station_id"],
-                        "to_station_id": rel.end_node["station_id"],
-                        "type": rel_type,
-                        "line_or_type": line_info
+                        "from_station_id": start_id,
+                        "to_station_id":   end_id,
+                        "type":            rel_type,
+                        "line_or_type":    line_info
                     })
                 
                 response["legs"] = leg_list

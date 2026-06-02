@@ -281,6 +281,11 @@ def query_alternative_routes(
     """
     Find alternative paths between two stations that avoid a specific intermediate station.
     Useful for routing around a delayed, closed, or congested station.
+    
+    CRITICAL: Use this tool ONLY when the user explicitly asks for an "alternative" route, 
+    or mentions that a station is "closed", "delayed", or to be "avoided".
+    This tool overrides standard route finding to completely bypass the avoid_station_id.
+    Do NOT use find_route if a station is closed.
 
     Args:
         origin_id:         e.g. "NR01" or "MS01"
@@ -484,7 +489,7 @@ def query_delay_ripple(delayed_station_id: str, hops: int = 2) -> list[dict]:
  
     with _driver() as driver:
         with driver.session() as session:
-            result = session.run(cypher_query, st_id=station_id)
+            result = session.run(cypher_query, st_id=delayed_station_id)
  
             for record in result:
                 connections.append({
@@ -507,7 +512,7 @@ def query_station_connections(station_id: str) -> list[dict]:
     Args:
         station_id: e.g. "MS01" or "NR01"
     """
-    cypher_query = """()
+    cypher_query = """
     MATCH (start {station_id: $st_id})-[r]-(neighbor) 
     WHERE type(r) IN ['METRO_LINK', 'RAIL_LINK', 'TRANSFER_TO']
     RETURN neighbor.station_id AS id, 

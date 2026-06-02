@@ -281,24 +281,8 @@ def query_alternative_routes(
     """
     Find alternative paths between two stations that avoid a specific intermediate station.
     Useful for routing around a delayed, closed, or congested station.
-    
-    CRITICAL: Use this tool ONLY when the user explicitly asks for an "alternative" route, 
-    or mentions that a station is "closed", "delayed", or to be "avoided".
-    This tool overrides standard route finding to completely bypass the avoid_station_id.
-    Do NOT use find_route if a station is closed.
-
-    Args:
-        origin_id:         e.g. "NR01" or "MS01"
-        destination_id:    e.g. "NR05" or "MS05"
-        avoid_station_id:  e.g. "NR03" or "MS03"
-        network:           "metro", "rail", or "auto"
-        max_routes:        Maximum number of alternative routes to return
-
-    Returns:
-        List of dicts: {"route": [list of station dicts], "total_time_min": int}
     """
-    # 1. Determine allowed relationship types dynamically
-    # 'auto' allows taking both systems and transferring between them
+    # 1. Determine allowed relationship types dynamically.
     if network == "metro":
         rel_types = "METRO_LINK"
     elif network == "rail":
@@ -306,56 +290,46 @@ def query_alternative_routes(
     else:
         rel_types = "METRO_LINK|RAIL_LINK|TRANSFER_TO"
 
-    # 2. Cypher Query
-    # Key optimizations:
-    # - Used *1..20 to prevent unbounded path searching (Performance safety)
-    # - Removed strict directionality (->) to allow bidirectional routing
-    # - Removed strict node labels to allow cross-system transfers
-    cypher_query = """
-    MATCH (origin {station_id: $oid}), (destination {dest_id})
-    
-    // Find paths up to 20 hops long using the allowed transit networks
-    MATCH path = (origin)-[:REL_TYPES_PLACEHOLDER*1..20]-(destination)
-    
-    // Filter out any path that contains the avoided station
-    WHERE NONE(node IN nodes(path) WHERE node.station_id = $avoid)
-    
-    // Calculate total journey time for each candidate path
-    WITH path,
-         reduce(t = 0, r IN relationships(path) | t + COALESCE(r.travel_time_min, 0)) AS total_time
-         
-    ORDER BY total_time ASC
-    LIMIT $max_routes
-    
-    // Format the output
-    RETURN [node IN nodes(path) | {
-                station_id: node.station_id,
-                name:       node.name
-            }] AS route,
-           total_time AS total_time_min
-    """.replace('REL_TYPES_PLACEHOLDER', rel_types)
-    
-    # Safe string replacement for Cypher curly braces
-    cypher_query = cypher_query.replace('{dest_id}', '{station_id: $did}')
-
-    alternatives = []
-
+    # 2. Temporarily mark the avoided station, run Dijkstra, then unmark.
+    #    This is faster than variable-length path matching which causes
+    #    combinatorial explosion on cross-network queries.
     with _driver() as driver:
         with driver.session() as session:
-            result = session.run(
-                cypher_query, 
-                oid=origin_id, 
-                did=destination_id,
-                avoid=avoid_station_id, 
-                max_routes=max_routes
-            )
-            
-            # 3. Parse the result into the expected Python list
-            for row in result:
-                alternatives.append({
-                    "route": row["route"],
-                    "total_time_min": row["total_time_min"]
-                })
+
+            # Mark the avoided station so Dijkstra skips it
+            session.run("""
+                MATCH (n {station_id: $avoid})
+                SET n._avoid = true
+            """, avoid=avoid_station_id)
+
+            result = session.run(f"""
+                MATCH (origin      {{station_id: $oid}}),
+                      (destination {{station_id: $did}})
+                CALL apoc.algo.dijkstra(
+                    origin, destination,
+                    '{rel_types}',
+                    'travel_time_min'
+                )
+                YIELD path, weight
+                WHERE NONE(node IN nodes(path) WHERE node._avoid = true)
+                RETURN [node IN nodes(path) | {{
+                            station_id: node.station_id,
+                            name:       node.name
+                        }}] AS route,
+                       weight AS total_time_min
+                LIMIT $max_routes
+            """, oid=origin_id, did=destination_id, max_routes=max_routes)
+
+            alternatives = [
+                {"route": row["route"], "total_time_min": row["total_time_min"]}
+                for row in result
+            ]
+
+            # Clean up the temporary marker
+            session.run("""
+                MATCH (n {station_id: $avoid})
+                REMOVE n._avoid
+            """, avoid=avoid_station_id)
 
     return alternatives
 

@@ -11,7 +11,7 @@
 | Full Name | Student ID | GitHub Username | Email |
 |-----------|-----------|----------------|-------|
 | 陳映均 | 110707519| chunchuninn | inkinbb15@gmail.com |
-| | | | |
+| 池翊寧 | 112302534 | ch1ng_9412 | ian9404120927@gmail.com |
 | 莊可翰 | 111409016 | hank1030zz | hank1030zz@gmail.com |
 
 ---

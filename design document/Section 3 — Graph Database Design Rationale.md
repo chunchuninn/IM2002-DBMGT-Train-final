@@ -220,7 +220,6 @@ network
 ---
 
 ## Query Type 4: Delay Ripple Analysis  
-## 查詢類型四：延誤影響範圍分析
 
 第四種 query type 是 delay ripple analysis，也就是查詢某個 station 發生延誤時，哪些 nearby stations 可能受到影響。
 

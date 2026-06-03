@@ -73,9 +73,10 @@ def example_query() -> dict:
 # ── NATIONAL RAIL AVAILABILITY ────────────────────────────────────────────────
 
 def query_national_rail_availability(
-    origin_id: str,
-    destination_id: str,
+    origin_id: str = "",
+    destination_id: str = "",
     travel_date: Optional[str] = None,
+    **kwargs,  # Absorb unexpected parameters passed by the LLM
 ) -> list[dict]:
     """
     Return national rail schedules that serve both origin and destination stations

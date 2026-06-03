@@ -137,15 +137,18 @@ MATCH (start {station_id: $origin}), (end {station_id: $dest})
 
 ---
 
-## Why Graph Database Is Suitable for This Design
+## Why Graph Database Is Suitable for This Design  
 
 TransitFlow 的核心查詢需求是 route planning，而 route planning 本質上是 graph traversal problem。使用者通常不只是查詢單一 station 的資料，而是想知道兩個 stations 之間如何連接、哪一條 path 最快、是否需要轉乘，以及某個 station 發生延誤時會影響哪些相鄰 stations。
 
 在 graph database 中，這些問題可以直接透過 nodes 和 relationships 表達。Station 是 node，station-to-station connection 是 relationship，travel time 是 relationship weight。這樣的資料結構和交通網路本身高度一致。
 
-以 fastest route search 為例，Neo4j 可以使用 Dijkstra’s algorithm。系統從 origin station node 出發，沿著 `METRO_LINK`、`RAIL_LINK` 或 `TRANSFER_TO` relationships 搜尋 destination station，並使用 `travel_time_min` 計算每一條 path 的總成本。最後，系統會回傳總旅行時間最低的 route。
+以 fastest route search 為例，Neo4j 可以使用 Dijkstra’s algorithm。系統從 origin station node 出發，沿著 `METRO_LINK`、`RAIL_LINK` 或 `TRANSFER_TO` relationships 搜尋 destination station，並使用 `travel_time_min` 作為 edge weight。Dijkstra’s algorithm 會持續選擇目前累積成本最低的下一個可到達 station，最後找出總旅行時間最低的 path。
 
-如果使用 relational database 實作同樣的 multi-hop routing，則需要透過 recursive CTE 反覆查詢 station connection table。查詢過程中還需要記錄已經走過的 stations、避免 cycle、累加 total travel time，最後再排序出成本最低的 path。相較之下，graph database 更直接地把這些 traversal logic 表達出來，也更適合維護 shortest path、interchange path 和 alternative route 這類查詢。
+如果使用 relational database 實作同樣的 multi-hop routing，則需要透過 recursive CTE 反覆查詢 station connection table。SQL query 需要不斷將 connection table 與自身 join，累積目前走過的 path，記錄已經拜訪過的 stations 以避免 cycle，計算每一條可能 path 的 total travel time，最後再從所有候選路徑中選出成本最低的結果。雖然這在 SQL 中可以做到，但寫法會更複雜，也比較不符合交通網路本身的資料結構。
+
+對於 delay ripple analysis，graph database 也更自然。當某個 station 發生延誤時，系統可以從該 station 出發，沿著 `METRO_LINK`、`RAIL_LINK` 和 `TRANSFER_TO` relationships 向外擴展，找出 one-hop、two-hop 或更多 hops 以內可能受到影響的 stations。這個邏輯接近 breadth-first search，也就是 BFS。相較之下，如果用 relational database 實作，就需要再次使用 recursive CTE，一層一層展開相鄰 stations。Neo4j 因為直接把 relationships 當成資料模型的一部分，所以可以更直接地表達這種 N-hop traversal。
+
 
 ---
 

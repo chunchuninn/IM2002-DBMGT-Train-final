@@ -27,27 +27,25 @@ or reassigned mid-project).
 
 | Task | Primary Owner | Supporting Member(s) | Notes |
 |------|--------------|---------------------|-------|
-| **Task 1** — Relational schema design (`schema.sql`) | | | |
-| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) | | | |
-| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) | | | |
-| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) | | | |
-| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) | | | |
-| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) | | | |
-| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | | | |
-| **Task 5** — Neo4j query functions (`graph/queries.py`) | | | |
-| **Task 6** *(if attempted)* — Optional extension | | | |
+| **Task 1** — Relational schema design (`schema.sql`) | 池翊寧 | 陳映均、莊可翰 | |
+| **Task 2a** — Core availability & fare queries (`query_national_rail_availability`, `query_metro_schedules`, `query_national_rail_fare`, `query_metro_fare`) | 莊可翰 | 池翊寧、陳映均 | |
+| **Task 2b** — Seat & user queries (`query_available_seats`, `query_user_profile`, `query_user_bookings`, `query_payment_info`) | 莊可翰 | 池翊寧、陳映均 | |
+| **Task 2c** — Write operations (`execute_booking`, `execute_cancellation`) | 莊可翰 | 池翊寧、陳映均 | |
+| **Task 2d** — Authentication queries (`login_user`, `register_user`, `get_user_secret_question`, `verify_secret_answer`, `update_password`) | 陳映均 | 池翊寧、莊可翰 | |
+| **Task 3** — PostgreSQL seeding (`seed_postgres.py`) | 池翊寧 | 陳映均、莊可翰 | |
+| **Task 4** — Neo4j graph design & seeding (`seed_neo4j.py`, `seed.cypher`) | 陳映均、莊可翰 | 池翊寧 | |
+| **Task 5** — Neo4j query functions (`graph/queries.py`) | 陳映均 | 池翊寧、莊可翰 | |
 
 ### Design Document
 
 | Section | Primary Author | Supporting Member(s) | Notes |
 |---------|--------------|---------------------|-------|
-| Section 1 — ER Diagram | | | |
-| Section 2 — Normalisation Justification | | | |
-| Section 3 — Graph Database Design Rationale | | | |
-| Section 4 — Vector / RAG Design | | | |
-| Section 5 — AI Tool Usage Evidence | | | |
-| Section 6 — Reflection & Trade-offs | | | |
-| Section 7 — Optional Extension *(if applicable)* | | | |
+| Section 1 — ER Diagram | 池翊寧 | | |
+| Section 2 — Normalisation Justification | 池翊寧 | | |
+| Section 3 — Graph Database Design Rationale | 陳映均 | | |
+| Section 4 — Vector / RAG Design | 莊可翰 | | |
+| Section 5 — AI Tool Usage Evidence | 莊可翰 | 池翊寧、陳映均 | |
+| Section 6 — Reflection & Trade-offs | 莊可翰 | 池翊寧、陳映均 | |
 
 ---
 
@@ -58,9 +56,9 @@ All members must sum to 100%.
 
 | Member | Estimated % | Brief justification |
 |--------|-----------|---------------------|
-| | % | |
-| | % | |
-| | % | |
+| 池翊寧 | 33% | |
+| 莊可翰 | 33% | |
+| 陳映均 | 33% | |
 | **Total** | **100%** | |
 
 ---
@@ -72,7 +70,7 @@ If nothing changed, write "No changes."
 
 | Change | Original plan | Revised plan | Reason |
 |--------|--------------|-------------|--------|
-| | | | |
+| No changes. | | | |
 
 ---
 
@@ -82,6 +80,6 @@ We confirm that this work allocation accurately reflects how responsibilities we
 
 | Name | Signature / Typed name | Date |
 |------|----------------------|------|
-| | | |
-| | | |
-| | | |
+| 池翊寧 | 池翊寧 | 2026/6/3 |
+| 莊可翰 | 莊可翰 | 2026/6/3 |
+| 陳映均 | 陳映均 | 2026/6/3 |

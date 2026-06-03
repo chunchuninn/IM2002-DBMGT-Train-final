@@ -219,22 +219,13 @@ network
 
 ---
 
-## Query Type 4: Delay Ripple Analysis
+## Query Type 4: Delay Ripple Analysis  
+## 查詢類型四：延誤影響範圍分析
 
 第四種 query type 是 delay ripple analysis，也就是查詢某個 station 發生延誤時，哪些 nearby stations 可能受到影響。
 
-這個查詢會從 delayed station node 出發，沿著 `METRO_LINK`、`RAIL_LINK` 和 `TRANSFER_TO` relationships 找出相鄰站點。它的概念接近 BFS，也就是從一個起點向外擴展一層或多層，找出 N hops 以內的 connected stations。
+這個查詢之所以適合 graph model，是因為延誤影響通常會沿著實體交通連線向外擴散。如果 `NR03` 發生延誤，系統可以從 `NR03` 這個 node 出發，沿著與它相連的 relationships 找出直接受到影響的 stations。例如，`NR03` 可以透過 `RAIL_LINK` 連到 `NR02` 和 `NR04`，也可以透過 `TRANSFER_TO` walkway 連到 metro station `MS07`。因此，graph model 可以同時捕捉 rail network 內部的影響，以及跨系統轉乘可能造成的影響。
 
-例如，如果 `NR03` 發生延誤，系統可以查出它直接連接的 national rail stations，也可以透過 `TRANSFER_TO` 找到與它相連的 metro station。這樣可以幫助 assistant 回答哪些 stations 或 routes 可能受到延誤波及。
+這個查詢邏輯接近 breadth-first search。系統可以先找出 one-hop neighbors，也就是與 delayed station 直接相連的站點；如果需要分析更大的影響範圍，也可以繼續往外找 two-hop 或 N-hop neighbors。因為 Neo4j 已經把 stations 存成 nodes，並把 station-to-station connections 存成 relationships，所以查詢可以直接沿著真實交通網路的結構進行 traversal。
 
-這種查詢很適合 graph database，因為 delay ripple 本身就是沿著 network connection 擴散的問題。透過 graph traversal，系統可以自然地從一個 station 找到相鄰 stations，並根據 hops 或 relationship type 控制查詢範圍。
-
----
-
-## Summary
-
-Overall, the Neo4j graph design models the physical transit network as connected data. `MetroStation` and `NationalRailStation` are stored as nodes, while `METRO_LINK`, `RAIL_LINK`, and `TRANSFER_TO` are stored as relationships. Station-level information such as `station_id`, `name`, and `lines` is stored as node properties, while segment-level information such as `line` and `travel_time_min` is stored as relationship properties.
-
-For interchange stations, the design deliberately keeps metro stations and national rail stations as separate nodes, connected by `TRANSFER_TO` relationships that represent walkways. This allows the system to preserve the independence of the two transport networks while still supporting cross-network journeys. It also allows transfer time to be included in total route cost instead of treating transfers as zero-cost movements.
-
-This design supports fastest route search, cross-network interchange paths, alternative routes, and delay ripple analysis. It also allows Dijkstra’s algorithm and graph traversal to be applied directly to the station network. Compared with implementing these routing queries only through relational joins and recursive CTEs, the graph model better matches the structure of the transit system and makes the route-related queries easier to express and maintain.
+如果使用 relational database，則需要透過 recursive CTE 反覆查詢 connection table，才能逐層展開相鄰站點。相比之下，graph database 的 node / relationship structure 更自然地支援 delay ripple analysis，也更容易控制查詢範圍，例如只查一跳、兩跳，或指定 relationship types。

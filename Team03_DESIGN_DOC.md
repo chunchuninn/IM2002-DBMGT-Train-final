@@ -37,6 +37,7 @@
 
 攻擊者發動彩虹表攻擊（Rainbow-table attack）時會預先計算大量常見密碼的雜湊值以建立龐大的對照表並在取得資料庫存取權後進行反查。系統為防禦此類攻擊會在每次建立新使用者的憑證時利用亂數生成器產生一組唯一的鹽值（Salt）。這組隨機字串會與使用者的明文密碼結合後才送入雜湊函數進行運算，例如當兩位使用者皆設定「password123」為密碼時，各自獨立的鹽值將使資料庫最終儲存的雜湊結果截然不同。這項機制使得攻擊者耗費巨資建立的彩虹表無法找到對應的雜湊值而徹底阻斷了透過預先計算進行反向破解的系統威脅。
 
+
 # Section 3 — Graph Database Design Rationale  
 
 TransitFlow 的 Neo4j graph database 用來建模城市捷運與國鐵系統中的站點連線關係。這個系統包含 city metro network 與 national rail network，兩者都由 stations、lines、adjacent stations 與 interchange points 組成。由於 route planning、cross-network transfer、alternative route search 和 delay ripple analysis 都需要沿著站點之間的連線進行多層查詢，因此使用 graph database 可以更自然地表達這類交通網路結構。
@@ -268,6 +269,7 @@ network
 
 如果使用 relational database，則需要透過 recursive CTE 反覆查詢 connection table，才能逐層展開相鄰站點。相比之下，graph database 的 node / relationship structure 更自然地支援 delay ripple analysis，也更容易控制查詢範圍，例如只查一跳、兩跳，或指定 relationship types。
 
+
 # Section 4 — Vector / RAG Design
 
 TransitFlow 的 policy document search 使用 pgvector extension 搭配 Retrieval-Augmented Generation技術。這個設計讓助理可以根據乘客的問題，從資料庫中找出語意最相近的 policy document，再交給 LLM 生成回答。不依賴關鍵字比對，而是比較文字的語意，因此就算乘客的問法和 policy 的用詞完全不同，系統仍然可以找到正確的規則。
@@ -378,6 +380,7 @@ Cosine similarity 的優點在於它是 magnitude-independent 的，只比較 ve
 Embedding dimension 與 provider 綁定。本系統使用 Ollama（768 維）。切換 provider 後必須重新 embed 所有 documents，否則 dimension mismatch 會導致 RAG 功能失效。
 
 ---
+
 
 # Section 5 — AI Tool Usage Evidence
 

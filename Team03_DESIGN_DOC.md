@@ -1,3 +1,4 @@
+# Section 1 — Entity-Relationship Diagram
 
 
 # Section2: Normalisation_Justification

@@ -1,4 +1,5 @@
 # Section 1 — Entity-Relationship Diagram
+<img width="4109" height="2938" alt="final project ERD" src="https://github.com/user-attachments/assets/88772c2a-6710-47ad-af1b-5099e2cd6681" />
 
 
 # Section2: Normalisation_Justification

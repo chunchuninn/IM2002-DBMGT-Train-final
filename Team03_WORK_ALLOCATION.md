@@ -56,7 +56,7 @@ All members must sum to 100%.
 
 | Member | Estimated % | Brief justification |
 |--------|-----------|---------------------|
-| 池翊寧 | 33% | |
+| 池翊寧 | 33% | 起初先完成 schema.sql, seed_postgres.py 的編程，以利後續開發作業 |
 | 莊可翰 | 33% | |
 | 陳映均 | 33% | |
 | **Total** | **100%** | |

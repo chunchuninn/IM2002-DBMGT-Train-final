@@ -57,7 +57,7 @@ All members must sum to 100%.
 | Member | Estimated % | Brief justification |
 |--------|-----------|---------------------|
 | 池翊寧 | 33% | 起初先完成 schema.sql, seed_postgres.py 的編程，以利後續開發作業 |
-| 莊可翰 | 33% | 完成seed_neo4j.py以利後續開發作業, 完成最初問題相關queries  |
+| 莊可翰 | 33% | 完成seed_neo4j.py以利後續開發作業, 完成最初問題相關relational queries  |
 | 陳映均 | 33% | 完成graph database(seed.cypher),Neo4j query functions以及登入介面 |
 | **Total** | **100%** | |
 
